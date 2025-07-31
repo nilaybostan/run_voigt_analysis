@@ -206,7 +206,6 @@ void Plot_Voigt_Fits() {
     auto *h_mass_pass = (TH1F*)f->Get("h_mass_pass");
     auto *h_mass_fail = (TH1F*)f->Get("h_mass_fail");
 
-    // Disable stat boxes on these histograms
     h_mass_pass->SetStats(kFALSE);
     h_mass_fail->SetStats(kFALSE);
 
@@ -247,7 +246,7 @@ void Plot_Voigt_Fits() {
     TF1 *gausPass = new TF1("gausPass", "gaus", 85, 96);
     h_mass_pass->Fit(gausPass, "RQ"); // Quiet fit, reduced printout
     TCanvas *c3 = new TCanvas("c3", "Gaussian Fit Pass", 800, 600);
-    h_mass_pass->SetStats(kFALSE);  // Also disable here before drawing
+    h_mass_pass->SetStats(kFALSE); 
     h_mass_pass->Draw();
     gausPass->SetLineColor(kRed);
     gausPass->Draw("SAME");
@@ -257,7 +256,7 @@ void Plot_Voigt_Fits() {
     TF1 *gausFail = new TF1("gausFail", "gaus", 85, 96);
     h_mass_fail->Fit(gausFail, "RQ");
     TCanvas *c4 = new TCanvas("c4", "Gaussian Fit Fail", 800, 600);
-    h_mass_fail->SetStats(kFALSE);  // Disable stat box here too
+    h_mass_fail->SetStats(kFALSE); 
     h_mass_fail->Draw();
     gausFail->SetLineColor(kRed);
     gausFail->Draw("SAME");
