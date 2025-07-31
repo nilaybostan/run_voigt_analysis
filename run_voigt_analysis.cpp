@@ -68,7 +68,7 @@ int main() {
     // Barrel and Endcap eta histograms for pass/fail/total (binning same as h_eta histograms)
     TH1F* h_eta_pass_barrel = new TH1F("h_eta_pass_barrel", "Barrel Muon #eta Efficiency;Probe #eta;Events", 48, -1.2, 1.2);
     TH1F* h_eta_fail_barrel = new TH1F("h_eta_fail_barrel", "Barrel Muon #eta Failures;Probe #eta;Events", 48, -1.2, 1.2);
-    TH1F* h_eta_total_barrel = new TH1F("h_eta_total_barrel", "Barrel Muon #eta Total;Probe #eta;Events", 28, -1.2, 1.2);
+    TH1F* h_eta_total_barrel = new TH1F("h_eta_total_barrel", "Barrel Muon #eta Total;Probe #eta;Events", 48, -1.2, 1.2);
 
     TH1F* h_eta_pass_endcap = new TH1F("h_eta_pass_endcap", "Endcap Muon #eta Efficiency;Probe #eta;Events", 48, 1.2, 2.4);
     TH1F* h_eta_fail_endcap = new TH1F("h_eta_fail_endcap", "Endcap Muon #eta Failures;Probe #eta;Events", 48, 1.2, 2.4);
