@@ -1,4 +1,8 @@
 //NilayBostan // July31/2025
+//Execute the code by using the command:
+//g++ -o run_voigt_analysis run_voigt_analysis.cpp root-config --cflags --libs -lRooFit -lRooFitCore
+//Then run the code by using:
+// ./run_voigt_analysis
 
 #include <TChain.h>
 #include <TFile.h>
