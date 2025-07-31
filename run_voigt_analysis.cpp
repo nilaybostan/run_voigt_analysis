@@ -66,13 +66,14 @@ int main() {
     TH2F* h2_pt_eta_total = new TH2F("h2_pt_eta_total", ";p_{T} [GeV/c];#eta", 100, 20, 120, 96, -2.4, 2.4);
 
     // Barrel and Endcap eta histograms for pass/fail/total (binning same as h_eta histograms)
-    TH1F* h_eta_pass_barrel = new TH1F("h_eta_pass_barrel", "Barrel Muon #eta Efficiency;Probe #eta;Events", 48, -1.2, 1.2);
-    TH1F* h_eta_fail_barrel = new TH1F("h_eta_fail_barrel", "Barrel Muon #eta Failures;Probe #eta;Events", 48, -1.2, 1.2);
+    TH1F* h_eta_pass_barrel  = new TH1F("h_eta_pass_barrel",  "Barrel Muon #eta Efficiency;Probe #eta;Events", 48, -1.2, 1.2);
+    TH1F* h_eta_fail_barrel  = new TH1F("h_eta_fail_barrel",  "Barrel Muon #eta Failures;Probe #eta;Events", 48, -1.2, 1.2);
     TH1F* h_eta_total_barrel = new TH1F("h_eta_total_barrel", "Barrel Muon #eta Total;Probe #eta;Events", 48, -1.2, 1.2);
 
-    TH1F* h_eta_pass_endcap = new TH1F("h_eta_pass_endcap", "Endcap Muon #eta Efficiency;Probe #eta;Events", 48, 1.2, 2.4);
-    TH1F* h_eta_fail_endcap = new TH1F("h_eta_fail_endcap", "Endcap Muon #eta Failures;Probe #eta;Events", 48, 1.2, 2.4);
-    TH1F* h_eta_total_endcap = new TH1F("h_eta_total_endcap", "Endcap Muon #eta Total;Probe #eta;Events", 48, 1.2, 2.4);
+    TH1F* h_eta_pass_endcap  = new TH1F("h_eta_pass_endcap",  "Endcap Muon #eta Efficiency;Probe #eta;Events", 24, 1.2, 2.4);
+    TH1F* h_eta_fail_endcap  = new TH1F("h_eta_fail_endcap",  "Endcap Muon #eta Failures;Probe #eta;Events", 24, 1.2, 2.4);
+    TH1F* h_eta_total_endcap = new TH1F("h_eta_total_endcap", "Endcap Muon #eta Total;Probe #eta;Events", 24, 1.2, 2.4);
+
 
     while (reader.Next()) {
         if (!*HLT_IsoMu24 || *nMuon < 2) continue;
