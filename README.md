@@ -4,4 +4,6 @@ Execute the code by using the command:
 
 g++ -o run_voigt_analysis run_voigt_analysis.cpp `root-config --cflags --libs` -lRooFit -lRooFitCore
 
-Then run the code: ./run_voigt_analysis 
+Then run the code by using: 
+
+./run_voigt_analysis 
