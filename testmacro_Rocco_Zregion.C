@@ -26,7 +26,7 @@ double invariantMass(double pt1, double eta1, double phi1,
     return sqrt(2 * pt1 * pt2 * (cosh(eta1 - eta2) - cos(phi1 - phi2)));
 }
 
-void testmacro_Rocco_NanoAOD(const std::string &inputFileName, bool isMC = false) {
+void testmacro_Rocco_Zregion(const std::string &inputFileName, bool isMC = false) {
     RoccoR rc;
     rc.init(edm::FileInPath("RoccoR/data/RoccoR2022.txt").fullPath());
 
