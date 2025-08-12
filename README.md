@@ -12,6 +12,8 @@ Then run the code by using:
 
 run the code by using the command below: 
 
+root -l
+
 .L testmacro_Rocco_Zregion.C+
 
 testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/*.root", false); this is for data file
