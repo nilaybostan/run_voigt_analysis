@@ -19,6 +19,7 @@ root -l
 .L testmacro_Rocco_Zregion.C+
 
 testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/*.root", false); 
+
 (this is for data file)
 
 (for Monte Carlo, make the second parameter `true`)
