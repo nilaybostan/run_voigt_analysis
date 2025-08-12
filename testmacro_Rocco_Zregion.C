@@ -6,17 +6,19 @@
 #include <string>
 #include "TH1D.h"
 #include "TFile.h"
-#include "TChain.h"
-
-//run the code: 
-//.L testmacro_Rocco_Zregion.C+
-//testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/*.root", false);
-//(MC için ikinci parametreyi true yap)
+#include "TTree.h"
+#include "TLorentzVector.h"
 
 struct Muon {
     int charge;
     double pt, eta, phi;
     double genPt;
+    bool tightId;
+    bool isGlobal;
+    bool isTracker;
+    bool isStandalone;
+    double iso04;
+    UChar_t nStations;
 };
 
 double invariantMass(double pt1, double eta1, double phi1,
@@ -24,14 +26,29 @@ double invariantMass(double pt1, double eta1, double phi1,
     return sqrt(2 * pt1 * pt2 * (cosh(eta1 - eta2) - cos(phi1 - phi2)));
 }
 
-void testmacro_Rocco_Zregion(const std::string &inputFileName, bool isMC = false) {
+void testmacro_Rocco_NanoAOD(const std::string &inputFileName, bool isMC = false) {
     RoccoR rc;
     rc.init(edm::FileInPath("RoccoR/data/RoccoR2022.txt").fullPath());
 
+    // Histograms
     TH1D* hMassUncorrected = new TH1D("hMassUncorrected", "Dimuon Mass Uncorrected (70-110 GeV);Mass (GeV);Events", 80, 70, 110);
     TH1D* hMassCorrected   = new TH1D("hMassCorrected",   "Dimuon Mass Rochester-Corrected (70-110 GeV);Mass (GeV);Events", 80, 70, 110);
 
-    // Open NanoAOD file
+    // Variables
+    Int_t   nMuon;
+    Float_t Muon_pt[100], Muon_eta[100], Muon_phi[100], Muon_pfRelIso04_all[100];
+    Int_t   Muon_charge[100];
+    Bool_t  Muon_tightId[100], Muon_isGlobal[100], Muon_isTracker[100], Muon_isStandalone[100];
+    UChar_t Muon_nStations[100];
+    Float_t Muon_genPt[100]; // only for MC if exists
+
+    Bool_t HLT_IsoMu24;
+
+    Int_t   nTrigObj;
+    Float_t TrigObj_pt[100], TrigObj_eta[100], TrigObj_phi[100];
+    UShort_t TrigObj_id[100];
+
+    // Open file
     TFile *file = TFile::Open(inputFileName.c_str());
     if (!file || file->IsZombie()) {
         std::cerr << "Cannot open file: " << inputFileName << std::endl;
@@ -45,23 +62,34 @@ void testmacro_Rocco_Zregion(const std::string &inputFileName, bool isMC = false
         return;
     }
 
-    // Variables for fixed-size arrays and count
-    Int_t nMuon = 0;
-    Float_t Muon_pt[100];
-    Float_t Muon_eta[100];
-    Float_t Muon_phi[100];
-    Int_t Muon_charge[100];
-    Float_t Muon_genPt[100]; // only for MC
+    // Check if Muon_genPt branch exists
+    bool hasMuonGenPt = (tree->GetBranch("Muon_genPt") != nullptr);
 
-    // Set branch addresses
+    // Set branches
     tree->SetBranchAddress("nMuon", &nMuon);
     tree->SetBranchAddress("Muon_pt", Muon_pt);
     tree->SetBranchAddress("Muon_eta", Muon_eta);
     tree->SetBranchAddress("Muon_phi", Muon_phi);
     tree->SetBranchAddress("Muon_charge", Muon_charge);
-    if (isMC) {
+    tree->SetBranchAddress("Muon_tightId", Muon_tightId);
+    tree->SetBranchAddress("Muon_isGlobal", Muon_isGlobal);
+    tree->SetBranchAddress("Muon_isTracker", Muon_isTracker);
+    tree->SetBranchAddress("Muon_isStandalone", Muon_isStandalone);
+    tree->SetBranchAddress("Muon_nStations", Muon_nStations);
+    tree->SetBranchAddress("Muon_pfRelIso04_all", Muon_pfRelIso04_all);
+    if (isMC && hasMuonGenPt) {
         tree->SetBranchAddress("Muon_genPt", Muon_genPt);
+    } else if (isMC && !hasMuonGenPt) {
+        std::cerr << "Warning: Muon_genPt branch missing in MC file. Using kScaleMC only." << std::endl;
     }
+
+    tree->SetBranchAddress("HLT_IsoMu24", &HLT_IsoMu24);
+
+    tree->SetBranchAddress("nTrigObj", &nTrigObj);
+    tree->SetBranchAddress("TrigObj_pt", TrigObj_pt);
+    tree->SetBranchAddress("TrigObj_eta", TrigObj_eta);
+    tree->SetBranchAddress("TrigObj_phi", TrigObj_phi);
+    tree->SetBranchAddress("TrigObj_id", TrigObj_id);
 
     Long64_t nEntries = tree->GetEntries();
     std::cout << "Processing " << nEntries << " events..." << std::endl;
@@ -69,63 +97,80 @@ void testmacro_Rocco_Zregion(const std::string &inputFileName, bool isMC = false
     for (Long64_t i = 0; i < nEntries; ++i) {
         tree->GetEntry(i);
 
-        if (nMuon < 2) continue;  // skip events with less than 2 muons
+        // Trigger and at least 2 muons
+        if (!HLT_IsoMu24 || nMuon < 2) continue;
 
-        // Fill muons vector
-        std::vector<Muon> muons;
-        for (int j = 0; j < nMuon; ++j) {
-            Muon mu;
-            mu.pt = Muon_pt[j];
-            mu.eta = Muon_eta[j];
-            mu.phi = Muon_phi[j];
-            mu.charge = Muon_charge[j];
-            mu.genPt = (isMC) ? Muon_genPt[j] : 0.0;
-            muons.push_back(mu);
+        int tagIdx = -1;
+        float maxTagPt = -1;
+
+        // Tag muon selection
+        for (int m = 0; m < nMuon; ++m) {
+            if (!Muon_tightId[m]) continue;
+            if (Muon_pt[m] < 29 || fabs(Muon_eta[m]) >= 2.4 || Muon_pfRelIso04_all[m] >= 0.15) continue;
+            if (!Muon_isGlobal[m] || !Muon_isTracker[m]) continue;
+
+            bool matched = false;
+            for (int t = 0; t < nTrigObj; ++t) {
+                if (TrigObj_id[t] != 13 || TrigObj_pt[t] < 24) continue;
+                float deta = Muon_eta[m] - TrigObj_eta[t];
+                float dphi = fabs(Muon_phi[m] - TrigObj_phi[t]);
+                if (dphi > M_PI) dphi = 2 * M_PI - dphi;
+                float dr2 = deta*deta + dphi*dphi;
+                if (dr2 < 0.1) matched = true;
+            }
+
+            if (matched && Muon_pt[m] > maxTagPt) {
+                maxTagPt = Muon_pt[m];
+                tagIdx = m;
+            }
         }
 
-        // Loop over all opposite-charge muon pairs
-        for (size_t j = 0; j < muons.size(); ++j) {
-            for (size_t k = j + 1; k < muons.size(); ++k) {
-                if (muons[j].charge * muons[k].charge >= 0) continue; // skip same sign
+        if (tagIdx < 0) continue;
 
-                double massUncorr = invariantMass(muons[j].pt, muons[j].eta, muons[j].phi,
-                                                 muons[k].pt, muons[k].eta, muons[k].phi);
+        // Probe selection
+        for (int p = 0; p < nMuon; ++p) {
+            if (p == tagIdx) continue;
+            if (Muon_charge[tagIdx] * Muon_charge[p] >= 0) continue;
+            if (!Muon_isTracker[p] || !Muon_isStandalone[p] || Muon_pt[p] < 20 || fabs(Muon_eta[p]) >= 2.4 || Muon_nStations[p] <= 1) continue;
 
-                if (massUncorr < 70 || massUncorr > 110) continue; // Z window cut
+            TLorentzVector tag, probe;
+            tag.SetPtEtaPhiM(Muon_pt[tagIdx], Muon_eta[tagIdx], Muon_phi[tagIdx], 0.105);
+            probe.SetPtEtaPhiM(Muon_pt[p], Muon_eta[p], Muon_phi[p], 0.105);
+            float massUncorr = (tag + probe).M();
+            if (massUncorr < 70 || massUncorr > 115) continue;
 
-                // Rochester correction
-                double sf_j = 1.0, sf_k = 1.0;
-                if (isMC) {
-                    if (muons[j].genPt > 0)
-                        sf_j = rc.kSpreadMC(muons[j].charge, muons[j].pt, muons[j].eta, muons[j].phi, muons[j].genPt, 0, 0);
-                    else
-                        sf_j = rc.kScaleMC(muons[j].charge, muons[j].pt, muons[j].eta, muons[j].phi, 0, 0);
+            // Rochester correction
+            double sf_tag = 1.0, sf_probe = 1.0;
+            if (isMC) {
+                if (hasMuonGenPt && Muon_genPt[tagIdx] > 0)
+                    sf_tag = rc.kSpreadMC(Muon_charge[tagIdx], Muon_pt[tagIdx], Muon_eta[tagIdx], Muon_phi[tagIdx], Muon_genPt[tagIdx], 0, 0);
+                else
+                    sf_tag = rc.kScaleMC(Muon_charge[tagIdx], Muon_pt[tagIdx], Muon_eta[tagIdx], Muon_phi[tagIdx], 0, 0);
 
-                    if (muons[k].genPt > 0)
-                        sf_k = rc.kSpreadMC(muons[k].charge, muons[k].pt, muons[k].eta, muons[k].phi, muons[k].genPt, 0, 0);
-                    else
-                        sf_k = rc.kScaleMC(muons[k].charge, muons[k].pt, muons[k].eta, muons[k].phi, 0, 0);
-                } else {
-                    sf_j = rc.kScaleDT(muons[j].charge, muons[j].pt, muons[j].eta, muons[j].phi, 0, 0);
-                    sf_k = rc.kScaleDT(muons[k].charge, muons[k].pt, muons[k].eta, muons[k].phi, 0, 0);
-                }
-
-                double corrPt_j = muons[j].pt * sf_j;
-                double corrPt_k = muons[k].pt * sf_k;
-
-                double massCorr = invariantMass(corrPt_j, muons[j].eta, muons[j].phi,
-                                               corrPt_k, muons[k].eta, muons[k].phi);
-
-                hMassUncorrected->Fill(massUncorr);
-                hMassCorrected->Fill(massCorr);
+                if (hasMuonGenPt && Muon_genPt[p] > 0)
+                    sf_probe = rc.kSpreadMC(Muon_charge[p], Muon_pt[p], Muon_eta[p], Muon_phi[p], Muon_genPt[p], 0, 0);
+                else
+                    sf_probe = rc.kScaleMC(Muon_charge[p], Muon_pt[p], Muon_eta[p], Muon_phi[p], 0, 0);
+            } else {
+                sf_tag = rc.kScaleDT(Muon_charge[tagIdx], Muon_pt[tagIdx], Muon_eta[tagIdx], Muon_phi[tagIdx], 0, 0);
+                sf_probe = rc.kScaleDT(Muon_charge[p], Muon_pt[p], Muon_eta[p], Muon_phi[p], 0, 0);
             }
+
+            TLorentzVector tagCorr, probeCorr;
+            tagCorr.SetPtEtaPhiM(Muon_pt[tagIdx]*sf_tag, Muon_eta[tagIdx], Muon_phi[tagIdx], 0.105);
+            probeCorr.SetPtEtaPhiM(Muon_pt[p]*sf_probe, Muon_eta[p], Muon_phi[p], 0.105);
+            float massCorr = (tagCorr + probeCorr).M();
+
+            // Fill histograms
+            hMassUncorrected->Fill(massUncorr);
+            hMassCorrected->Fill(massCorr);
         }
     }
 
-    TFile outFile(isMC ? "DimuonMass_MC_Rochester.root" : "DimuonMass_Data_Rochester.root", "RECREATE");
+    TFile outFile(isMC ? "Dimuon_TagProbe_MC.root" : "Dimuon_TagProbe_Data.root", "RECREATE");
     hMassUncorrected->Write();
     hMassCorrected->Write();
     outFile.Close();
 
-    std::cout << "Histograms saved to " << (isMC ? "DimuonMass_MC_Rochester.root" : "DimuonMass_Data_Rochester.root") << std::endl;
+    std::cout << "Histograms saved to " << (isMC ? "Dimuon_TagProbe_MC.root" : "Dimuon_TagProbe_Data.root") << std::endl;
 }
