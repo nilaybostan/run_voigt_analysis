@@ -8,6 +8,11 @@
 #include "TFile.h"
 #include "TChain.h"
 
+//run the code: 
+//.L testRoccoR_NanoAOD.C+
+//testmacro_Rocco_NanoAOD("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/*.root", false);
+//(MC için ikinci parametreyi true yap)
+
 struct Muon {
     int charge;
     double pt, eta, phi;
