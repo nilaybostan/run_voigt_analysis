@@ -10,7 +10,7 @@ Then run the code by using:
 
 ./run_voigt_analysis 
 
-2) Momentum corrections, applying Rochester corrections
+2) Momentum corrections, applying Rochester corrections:
 
 you need to be in cmsssw to run this code, so you should do first `cmsenv` and then, run the code by using the command below: 
 
