@@ -16,7 +16,7 @@ you need to be in cmsssw to run this code, so you should do first `cmsenv` and t
 
 root -l
 
-.L testmacro_Rocco_Zregion.C+
+.L testmacro_Rocco_Zregion.C
 
 testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/*.root", false); 
 
