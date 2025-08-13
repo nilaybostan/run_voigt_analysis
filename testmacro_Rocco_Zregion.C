@@ -61,7 +61,8 @@ void testmacro_Rocco_Zregion(const std::string &inputFileName, bool isMC = false
         file->Close();
         return;
     }
-
+    //(you can update this code using TChain chain("Events") to open multiple data files directly)
+    
     // Check if Muon_genPt branch exists
     bool hasMuonGenPt = (tree->GetBranch("Muon_genPt") != nullptr);
 
