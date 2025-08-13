@@ -22,4 +22,6 @@ testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NAN
 
 (this is for data file)
 
-(for Monte Carlo, make the second parameter `true`)
+For Monte Carlo, make the second parameter `true` as following: 
+
+testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/DY_.root", true); 
