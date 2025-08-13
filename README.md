@@ -12,7 +12,13 @@ Then run the code by using:
 
 2) Momentum corrections, applying Rochester corrections:
 
-you need to be in cmsssw to run this code, so you should do first `cmsenv` and then, run the code by using the command below: 
+first, compile (use the Makefile in the folder)
+
+make
+export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
+export ROOT_INCLUDE_PATH=$PWD:$ROOT_INCLUDE_PATH
+
+you need to be in cmsssw to run this code, so you should do `cmsenv` and then, run the code by using the command below: 
 
 root -l
 
