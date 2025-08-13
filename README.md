@@ -18,7 +18,7 @@ make
 export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 export ROOT_INCLUDE_PATH=$PWD:$ROOT_INCLUDE_PATH
 
-you need to be in cmsssw to run this code, so you should do `cmsenv` and then, run the code by using the command below: 
+you need to be in cmssw to run this code, so you should do `cmsenv` and then, run the code by using the command below: 
 
 root -l
 
