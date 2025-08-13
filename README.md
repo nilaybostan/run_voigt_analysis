@@ -12,7 +12,7 @@ Then run the code by using:
 
 2) Momentum corrections, applying Rochester corrections
 
-you need to be in cmsssw to run this code, so you should do first 'cmsenv' and then, run the code by using the command below: 
+you need to be in cmsssw to run this code, so you should do first `cmsenv` and then, run the code by using the command below: 
 
 root -l
 
