@@ -12,7 +12,7 @@ Then run the code by using:
 
 2) Momentum corrections, applying Rochester corrections:
 
-first, compile (use the Makefile in the folder)
+first, compile (use the `Makefile` in the folder)
 
 make
 export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
