@@ -82,7 +82,7 @@ void DrawComparisonWithRatio(TH1D* hUnweighted, TH1D* hWeighted, TH1D* hRatio, c
     TCanvas* c = new TCanvas(("c_"+name).c_str(), name.c_str(), 800, 800);
 
     // Upper pad
-    TPad* pad1 = new TPad("pad1","pad1",0,0.4,1,1);
+    TPad* pad1 = new TPad("pad1","pad1",0,0.3,1,1);
     pad1->SetBottomMargin(0.02);
     pad1->Draw();
     pad1->cd();
@@ -95,30 +95,27 @@ void DrawComparisonWithRatio(TH1D* hUnweighted, TH1D* hWeighted, TH1D* hRatio, c
     hWeighted->SetMarkerStyle(21);
 
     hUnweighted->SetTitle(("Comparison of "+name).c_str());
-    hUnweighted->GetXaxis()->SetTitle("");  
+    hUnweighted->GetXaxis()->SetTitle("");  // X-axis hidden in upper pad
     hUnweighted->GetYaxis()->SetTitle("Events");
-    hUnweighted->GetYaxis()->SetTitleSize(0.06);
-    hUnweighted->GetYaxis()->SetLabelSize(0.05);
-    hUnweighted->GetYaxis()->SetTitleOffset(0.8);
     hUnweighted->Draw("E");
     hWeighted->Draw("E SAME");
 
     TLegend* legend = new TLegend(0.6,0.7,0.88,0.88);
     legend->AddEntry(hUnweighted,"Uncorr","lep");
     legend->AddEntry(hWeighted,"Corr","lep");
-    legend->SetTextSize(0.05);
     legend->Draw();
 
     TLatex latex;
     latex.SetNDC();
-    latex.SetTextSize(0.05);
+    latex.SetTextFont(42);
+    latex.SetTextSize(0.04);
     latex.DrawLatex(0.15,0.92,"CMS Preliminary");
 
     // Lower pad
     c->cd();
-    TPad* pad2 = new TPad("pad2","pad2",0,0.05,1,0.4);
+    TPad* pad2 = new TPad("pad2","pad2",0,0.05,1,0.3);
     pad2->SetTopMargin(0.02);
-    pad2->SetBottomMargin(0.25);
+    pad2->SetBottomMargin(0.35);
     pad2->Draw();
     pad2->cd();
 
@@ -126,17 +123,14 @@ void DrawComparisonWithRatio(TH1D* hUnweighted, TH1D* hWeighted, TH1D* hRatio, c
     hRatio->SetMarkerStyle(20);
     hRatio->SetTitle("");
     hRatio->GetXaxis()->SetTitle(xTitle.c_str());
+    hRatio->GetXaxis()->SetTitleSize(0.12);
+    hRatio->GetXaxis()->SetTitleOffset(1.0);
+    hRatio->GetXaxis()->SetLabelSize(0.10);
     hRatio->GetYaxis()->SetTitle("Uncorr / Corr");
-    
     hRatio->GetYaxis()->SetNdivisions(505);
     hRatio->GetYaxis()->SetTitleSize(0.12);
-    hRatio->GetYaxis()->SetLabelSize(0.11);
-    hRatio->GetYaxis()->SetTitleOffset(0.4);
-    
-    hRatio->GetXaxis()->SetTitleSize(0.12);
-    hRatio->GetXaxis()->SetLabelSize(0.11);
-    hRatio->GetXaxis()->SetTitleOffset(1.0);
-
+    hRatio->GetYaxis()->SetTitleOffset(0.5);
+    hRatio->GetYaxis()->SetLabelSize(0.10);
     hRatio->Draw("E");
 
     c->SaveAs((name+".pdf").c_str());
@@ -151,7 +145,7 @@ void testmacro_FullCorrections_NoJets_2(
     const std::string &muPOGDir = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/data/POG/MUO/"
 )
 {
-    bool isMC = !isData;
+    bool isMC = !isData; // internally consistent
 
     // --------------------- Rochester ---------------------
     RoccoR rc;
@@ -182,9 +176,9 @@ void testmacro_FullCorrections_NoJets_2(
     TH1D* hProbeEtaUnweighted = new TH1D("hProbeEtaUnweighted","Probe #eta (Unweighted); #eta; Events",48,-2.4,2.4);
     TH1D* hProbeEtaWeighted   = new TH1D("hProbeEtaWeighted","Probe #eta (Weighted); #eta; Events",48,-2.4,2.4);
 
-    TH1D* hMassRatio = new TH1D("hMassRatio","Mass ratio; M_{#mu#mu} [GeV]; Ratio",80,70,110);
-    TH1D* hPtRatio   = new TH1D("hPtRatio","pT ratio; p_{T} [GeV]; Ratio",50,0,200);
-    TH1D* hEtaRatio  = new TH1D("hEtaRatio","#eta ratio; #eta; Ratio",48,-2.4,2.4);
+    TH1D* hMassRatio = new TH1D("hMassRatio","Mass ratio (Uncorr / Corr); M_{#mu#mu} [GeV]; Ratio",80,70,110);
+    TH1D* hPtRatio   = new TH1D("hPtRatio","pT ratio (Uncorr / Corr); p_{T} [GeV]; Ratio",50,0,200);
+    TH1D* hEtaRatio  = new TH1D("hEtaRatio","#eta ratio (Uncorr / Corr); #eta; Ratio",48,-2.4,2.4);
 
     // --------------------- TChain setup ------------------
     TChain chain("Events");
@@ -198,7 +192,7 @@ void testmacro_FullCorrections_NoJets_2(
     UChar_t Muon_nStations[100];
     Float_t Muon_genPt[100];
     Bool_t HLT_IsoMu24;
-    Int_t Pileup_nTrueInt=0;
+    Float_t Pileup_nTrueInt=0; // <-- fixed type
 
     chain.SetBranchAddress("nMuon",&nMuon);
     chain.SetBranchAddress("Muon_pt",Muon_pt);
@@ -269,13 +263,8 @@ void testmacro_FullCorrections_NoJets_2(
             }
 
             // MuonPOG SFs
-            double sf_tag_pog= getMuonSF(Muon_pt[tagIdx], Muon_eta[tagIdx], muonZ) *
-                               getMuonSF(Muon_pt[tagIdx], Muon_eta[tagIdx], muonJPsi) *
-                               getMuonSF(Muon_pt[tagIdx], Muon_eta[tagIdx], muonHighPt);
-
-            double sf_probe_pog= getMuonSF(Muon_pt[p], Muon_eta[p], muonZ) *
-                                 getMuonSF(Muon_pt[p], Muon_eta[p], muonJPsi) *
-                                 getMuonSF(Muon_pt[p], Muon_eta[p], muonHighPt);
+            double sf_tag_pog= getMuonSF(Muon_pt[tagIdx], Muon_eta[tagIdx], muonZ);  
+            double sf_probe_pog= getMuonSF(Muon_pt[p], Muon_eta[p], muonZ);
 
             // ScaleSmearing SF
             double sf_tag_smear  = getMuonSF(Muon_pt[tagIdx], Muon_eta[tagIdx], muonScaleSmear);
@@ -341,3 +330,4 @@ void testmacro_FullCorrections_NoJets_2(
     DrawComparisonWithRatio(hProbePtUnweighted, hProbePtWeighted, hPtRatio, "ProbePt", "p_{T} [GeV]");
     DrawComparisonWithRatio(hProbeEtaUnweighted, hProbeEtaWeighted, hEtaRatio, "ProbeEta", "#eta");
 }
+
