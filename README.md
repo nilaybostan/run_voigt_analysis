@@ -33,9 +33,14 @@ For Monte Carlo, make the second parameter `true` as following:
 testmacro_Rocco_Zregion("root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/DY_.root", true); 
 
 3) All Muon Corrections applied code: testmacro_FullCorrections_NoJets_2.C, just run using below:
+   
 root -l
+
 root [0] gSystem->Load("$CMSSW_BASE/src/RoccoR/libRoccoR.so");
+
 root [1] .L testmacro_FullCorrections_NoJets_2.C+
+
 root [2] std::vector<std::string> files = {"root://xrootd-cms.infn.it//store/data/Run2022F/Muon/NANOAOD/22Sep2023-v2/2550000/187620f5-a4ae-467a-a56f-4569e7b32801.root"};
+
 root [3] testmacro_FullCorrections_NoJets_2(files, true);
 
