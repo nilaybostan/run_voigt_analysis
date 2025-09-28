@@ -44,3 +44,14 @@ root [2] std::vector<std::string> files = {"root://xrootd-cms.infn.it//store/dat
 
 root [3] testmacro_FullCorrections_NoJets_2(files, true);
 
+
+4) 
+
+runMacro.sh
+
+runMacro.sub
+
+runTestMacro.C
+
+Condor job submission files, can be run: `condor_submit runMacro.sub`
+
