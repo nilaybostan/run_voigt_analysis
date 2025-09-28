@@ -1,0 +1,11 @@
+# runMacro.sub
+universe = vanilla
+executable = runMacro.sh
+arguments = 
+output = log/runMacro_$(Cluster)_$(Process).out
+error = log/runMacro_$(Cluster)_$(Process).err
+log = log/runMacro_$(Cluster)_$(Process).log
+request_memory = 2000MB
+request_cpus = 1
++JobFlavour = "espresso"
+queue
