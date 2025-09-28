@@ -16,4 +16,3 @@ transfer_output_files   = output
 when_to_transfer_output = ON_EXIT
 
 queue
-
