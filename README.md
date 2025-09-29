@@ -55,5 +55,5 @@ runMacro.sub
 
 runTestMacro.C
 
-Condor job submission files, can be run: `condor_submit runMacro.sub`
+Condor job submission files, can be run by using the command: `condor_submit runMacro.sub`
 
