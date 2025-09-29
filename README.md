@@ -44,6 +44,8 @@ root [2] std::vector<std::string> files = {"root://xrootd-cms.infn.it//store/dat
 
 root [3] testmacro_FullCorrections_NoJets_2(files, true);
 
+Note: testmacro_FullCorrections_NoJets_2(files, false);  -> For MC files (for instance Drell-Yan)
+
 
 4) Condor Job Submission:
 
