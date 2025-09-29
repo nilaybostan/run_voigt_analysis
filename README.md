@@ -47,7 +47,7 @@ root [3] testmacro_FullCorrections_NoJets_2(files, true);
 Note: testmacro_FullCorrections_NoJets_2(files, false);  -> For MC files (for instance Drell-Yan)
 
 
-4) Condor Job Submission:
+4) Condor Job Submission Files:
 
 runMacro.sh
 
