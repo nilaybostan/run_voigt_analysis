@@ -1,5 +1,5 @@
 // testmacro_FullCorrections_NoJets_2_updated_NoStats.C
-// Nilay Bostan — Updated: tight pads + flipped ratio (W/U) + statbox disabled
+// Nilay Bostan
 
 #include "RoccoR.h"
 #include "FWCore/ParameterSet/interface/FileInPath.h"
