@@ -30,7 +30,7 @@ struct PUWeight {
     double weight;
 };
 
-// ---------------- Helper functions --------------------
+// ---------------- Help functions --------------------
 double getMuonSF(double pt, double eta, const std::vector<MuonSF>& sfTable){
     for(const auto &bin : sfTable){
         if(pt>=bin.ptMin && pt<bin.ptMax && eta>=bin.etaMin && eta<bin.etaMax)
