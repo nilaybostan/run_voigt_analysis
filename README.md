@@ -55,5 +55,7 @@ runMacro.sub
 
 runTestMacro.C
 
-Condor job submission files, can be run by using the command: `condor_submit runMacro.sub`
+Condor job submission files can be run by using the command: condor_submit runMacro.sub
+
+then, you can check your job summary by using the command in bash: condor_q 
 
