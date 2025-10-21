@@ -2,8 +2,8 @@ void ratio_histos() {
     TFile *f1 = TFile::Open("output_FullCorrections_Data_2.root");
     TFile *f2 = TFile::Open("output_FullCorrections_MC_2.root");
 
-    TH1D *h1 = (TH1D*)f1->Get("hMassweighted"); // Data
-    TH1D *h2 = (TH1D*)f2->Get("hMassweighted"); // MC
+    TH1D *h1 = (TH1D*)f1->Get("hMassWeighted"); // Data
+    TH1D *h2 = (TH1D*)f2->Get("hMassWeighted"); // MC
     TH1D *hZ_data = (TH1D*)f1->Get("hZWindow");   // Data Z window
     TH1D *hZ_mc   = (TH1D*)f2->Get("hZWindow");   // MC Z window
 
