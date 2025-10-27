@@ -30,7 +30,7 @@ void train_BDT_HTo2Mu() {
     // Sinyal (H→μμ) ve background (Z→μμ, DY, ttbar, vb.) dosyalarını aç
     // --------------------------------------------------------------
     TFile* inputSig = TFile::Open("root://xrootd-cms.infn.it//store/mc/Run3Summer22NanoAODv12/VBFHto2Mu_M-125_TuneCP5_withDipoleRecoil_13p6TeV_powheg-pythia8/NANOAODSIM/130X_mcRun3_2022_realistic_v5-v3/50000/07efcc80-1811-4648-90bb-9a52a423a65f.root");
-    TFile* inputBkg = TFile::Open("root://xrootd-cms.infn.it//store/data/Run2022C/Muon/NANOAOD/22Sep2023-v1/2520000/393889f7-173f-48ba-ad46-94828a4ee4b2.root");
+    TFile* inputBkg = TFile::Open("root://xrootd-cms.infn.it//store/mc/Run3Summer22NanoAODv12/DYto2L-2Jets_MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/NANOAODSIM/130X_mcRun3_2022_realistic_v5-v2/2520000/aec6684e-3416-4b7c-a96f-78f261659521.root");
 
     TTree* signalTree = (TTree*)inputSig->Get("Events");
     TTree* backgroundTree = (TTree*)inputBkg->Get("Events");
@@ -110,6 +110,6 @@ void train_BDT_HTo2Mu() {
     // Çıktı ve ROC GUI
     // --------------------------------------------------------------
     outputFile->Close();
-    std::cout << "\n BDT eğitimi tamamlandı! Sonuç dosyası: " << outfileName << std::endl;
+    std::cout << "BDT eğitimi tamamlandı! Sonuç dosyası: " << outfileName << std::endl;
     TMVA::TMVAGui(outfileName);
 }
