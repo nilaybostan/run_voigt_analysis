@@ -110,6 +110,6 @@ void train_BDT_HTo2Mu() {
     // Çıktı ve ROC GUI
     // --------------------------------------------------------------
     outputFile->Close();
-    std::cout << "\n✅ BDT eğitimi tamamlandı! Sonuç dosyası: " << outfileName << std::endl;
+    std::cout << "\n BDT eğitimi tamamlandı! Sonuç dosyası: " << outfileName << std::endl;
     TMVA::TMVAGui(outfileName);
 }
