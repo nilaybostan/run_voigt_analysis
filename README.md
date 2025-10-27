@@ -1,4 +1,4 @@
-For CMS Dimuon Analysis, these codes can be applied to data and Drell-Yan (MC) files:
+For CMS Dimuon Analysis, these codes can be applied to data, signal, and background Drell-Yan (MC) files:
 
 1) Muon Efficiency Measurement for Higgs to Dimuon Analysis in CMS (with Tag-and-Probe):
 
