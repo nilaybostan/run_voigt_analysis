@@ -1,8 +1,7 @@
 #include "RoccoR.h"
 
-// add these two BEFORE JetCorrections.h
-#include <TRandom.h>    // defines gRandom
-#include <TChain.h>     // defines TChain
+#include <TRandom.h>    
+#include <TChain.h>     
 
 #include "JetCorrections.h"
 #include <TFile.h>
@@ -11,6 +10,7 @@
 #include <TTreeReaderArray.h>
 #include <TLorentzVector.h>
 #include <TH1F.h>
+#include <TH2F.h> 
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -121,6 +121,15 @@ void testmacro_FullCorrections_FullJetsMuons(std::vector<std::string> inputFiles
     TH1F *h_dijetMass = new TH1F("h_dijetMass", "Dijet invariant mass;M_{jj} [GeV];Events", 100, 0, 2000);
     TH1F *h_jetPtCorr = new TH1F("h_jetPtCorr", "Corrected jet p_{T};p_{T}^{corr} [GeV];Jets", 100, 0, 1000);
 
+    // === 2D histograms ===
+    TH2F *h_mass_vs_pt = new TH2F("h_mass_vs_pt",
+                                  "Dimuon invariant mass vs p_{T}^{#mu#mu};M_{#mu#mu} [GeV];p_{T}^{#mu#mu} [GeV]",
+                                  80, 70, 110, 100, 0, 500);
+
+    TH2F *h_dijetMass_vs_pt = new TH2F("h_dijetMass_vs_pt",
+                                       "Dijet invariant mass vs p_{T}^{jj};M_{jj} [GeV];p_{T}^{jj} [GeV]",
+                                       100, 0, 2000, 100, 0, 1000);
+
     // === Setup tree reader ===
     TChain chain("Events");
     for (auto &f : inputFiles) chain.Add(f.c_str());
@@ -132,7 +141,7 @@ void testmacro_FullCorrections_FullJetsMuons(std::vector<std::string> inputFiles
     TTreeReaderArray<Float_t> Muon_eta(reader, "Muon_eta");
     TTreeReaderArray<Float_t> Muon_phi(reader, "Muon_phi");
     TTreeReaderArray<Int_t> Muon_charge(reader, "Muon_charge");
-    TTreeReaderArray<Bool_t> Muon_mediumId(reader, "Muon_mediumId"); // <-- CHANGED HERE
+    TTreeReaderArray<Bool_t> Muon_mediumId(reader, "Muon_mediumId");
     TTreeReaderArray<Float_t> Muon_pfRelIso04_all(reader, "Muon_pfRelIso04_all");
     TTreeReaderValue<Bool_t> HLT_IsoMu24(reader, "HLT_IsoMu24");
 
@@ -222,6 +231,7 @@ void testmacro_FullCorrections_FullJetsMuons(std::vector<std::string> inputFiles
             TLorentzVector dimuon = tag + probe;
             h_mass->Fill(dimuon.M(), totalWeight);
             h_dimuonPt->Fill(dimuon.Pt(), totalWeight);
+            h_mass_vs_pt->Fill(dimuon.M(), dimuon.Pt(), totalWeight);
         }
 
         // --- Jet loop ---
@@ -238,6 +248,7 @@ void testmacro_FullCorrections_FullJetsMuons(std::vector<std::string> inputFiles
             TLorentzVector dijet = jets[0] + jets[1];
             h_dijetPt->Fill(dijet.Pt(), puWeight);
             h_dijetMass->Fill(dijet.M(), puWeight);
+            h_dijetMass_vs_pt->Fill(dijet.M(), dijet.Pt(), puWeight);
         }
     }
 
@@ -249,6 +260,8 @@ void testmacro_FullCorrections_FullJetsMuons(std::vector<std::string> inputFiles
     h_dijetPt->Write();
     h_dijetMass->Write();
     h_jetPtCorr->Write();
+    h_mass_vs_pt->Write();
+    h_dijetMass_vs_pt->Write(); // NEW
     outFile.Close();
     std::cout << "Output written to " << outFileName << std::endl;
 }
