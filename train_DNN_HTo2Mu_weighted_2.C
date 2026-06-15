@@ -128,9 +128,7 @@ preselection = preselection &&
     "!V"
 );
 
-    // ------------------------------------------------------
-    // DNN METHOD (TMVA DL)
-    // ------------------------------------------------------
+ 
     // ------------------------------------------------------
 // DNN METHOD (TMVA DL)
 // ------------------------------------------------------
@@ -159,7 +157,7 @@ factory.BookMethod(
     std::cout << "\n=== Training finished ===\n";
 
     // ======================================================
-    // 🔍 ANALYSIS PART (SAFE + CORRECT PATHS)
+    // ANALYSIS PART
     // ======================================================
    TFile* f = TFile::Open("TMVA_HTo2Mu_DNN.root");
 if (!f || f->IsZombie()) {
@@ -178,7 +176,7 @@ if (!f || f->IsZombie()) {
     dir->ls();
 
     // ------------------------------------------------------
-    // SAFE GET HELPERS
+    // GET HELPERS
     // ------------------------------------------------------
     auto getH = [&](const char* name) -> TH1* {
         TH1* h = (TH1*)f->Get(name);
@@ -186,7 +184,7 @@ if (!f || f->IsZombie()) {
         return h;
     };
 
-    // ⚠️ TMVA DL correct naming (important fix)
+    // TMVA DL path
     TH1* hTrainSig = getH("dataset/Method_DL/DL/MVA_DL_Train_S");
     TH1* hTrainBkg = getH("dataset/Method_DL/DL/MVA_DL_Train_B");
     TH1* hTestSig  = getH("dataset/Method_DL/DL/MVA_DL_S");
@@ -197,9 +195,7 @@ if (!f || f->IsZombie()) {
         return;
     }
 
-    // ------------------------------------------------------
-    // DRAW SCORE DISTRIBUTIONS
-    // ------------------------------------------------------
+
     // ------------------------------------------------------
 // DRAW SCORE DISTRIBUTIONS
 // ------------------------------------------------------
@@ -237,7 +233,7 @@ leg->Draw();
 c1->SaveAs("DNN_score.png");
 
     // ------------------------------------------------------
-    // ROC CURVE (SAFE)
+    // ROC CURVE
     // ------------------------------------------------------
     TObject* objROC = f->Get("dataset/Method_DL/DL/MVA_DL_trainingEffBvsRejBf");
 
