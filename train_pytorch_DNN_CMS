@@ -10,6 +10,10 @@ torch.set_num_threads(2)
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.base import BaseEstimator, ClassifierMixin
+from scipy.stats import ks_2samp
+from sklearn.metrics import precision_recall_curve
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import average_precision_score
 from sklearn.metrics import roc_auc_score
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import train_test_split
@@ -368,12 +372,19 @@ def load_sample(files, label, process, xsec_pb):
 
     X = X[mask_np]
     w_physics = w_physics[mask_np]
+    mll = mll[mask_np]
 
-    finite_mask = np.isfinite(X).all(axis=1) & np.isfinite(w_physics)
+    finite_mask = (
+        np.isfinite(X).all(axis=1)
+    	& np.isfinite(w_physics)
+    	& np.isfinite(mll)
+    )
+
     if not np.all(finite_mask):
         print(f"WARNING: removing {np.sum(~finite_mask)} non-finite selected events")
         X = X[finite_mask]
         w_physics = w_physics[finite_mask]
+        mll = mll[finite_mask]
 
     y = np.full(len(X), label, dtype=np.int64)
     proc = np.full(len(X), process, dtype=object)
@@ -382,24 +393,38 @@ def load_sample(files, label, process, xsec_pb):
         f"{process}: {len(X)} selected events | "
         f"expected yield = {np.sum(w_physics):.6f}"
     )
-    return X, y, w_physics, proc
+    return X, y, w_physics, proc, mll
 
 # ============================================================
 # LOAD AND MERGE ALL PROCESSES
 # ============================================================
-all_X, all_y, all_w_physics, all_proc = [], [], [], []
+
+all_X = []
+all_y = []
+all_w_physics = []
+all_proc = []
+all_mll = []     
 
 for process, cfg in SAMPLES.items():
-    X_i, y_i, wphys_i, proc_i = load_sample(cfg["files"], cfg["label"], process, XSECS_PB[process])
+
+    X_i, y_i, wphys_i, proc_i, mll_i = load_sample(
+        cfg["files"],
+        cfg["label"],
+        process,
+        XSECS_PB[process]
+    )
+
     all_X.append(X_i)
     all_y.append(y_i)
     all_w_physics.append(wphys_i)
     all_proc.append(proc_i)
+    all_mll.append(mll_i)    
 
 X = np.vstack(all_X)
 y = np.concatenate(all_y)
 w_physics = np.concatenate(all_w_physics)
 proc = np.concatenate(all_proc)
+mll_all = np.concatenate(all_mll)   
 
 # ============================================================
 # TRAIN / VALIDATION / TEST SPLIT (60% / 20% / 20%)
@@ -518,6 +543,40 @@ for epoch in range(EPOCHS):
         if bad >= PATIENCE:
             print("Early stopping triggered.")
             break
+            
+# ============================================================
+# LOSS CURVE
+# ============================================================
+
+plt.figure(figsize=(7,6))
+
+plt.plot(
+    train_loss,
+    label="Training Loss"
+)
+
+plt.plot(
+    val_loss,
+    label="Validation Loss"
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Training and Validation Loss")
+
+plt.legend()
+plt.grid(alpha=0.3)
+
+plt.tight_layout()
+
+plt.savefig(
+    "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/Loss_2024.png",
+    dpi=300
+)
+
+plt.close()
+
+print("Saved: Loss_2023.png")
 
 # ============================================================
 # EVALUATION & METRICS GENERATION
@@ -529,6 +588,26 @@ with torch.no_grad():
     ptr = torch.sigmoid(model(torch.tensor(Xtr, dtype=torch.float32))).numpy().ravel()
     pval = torch.sigmoid(model(torch.tensor(Xval, dtype=torch.float32))).numpy().ravel()
     pte = torch.sigmoid(model(torch.tensor(Xte, dtype=torch.float32))).numpy().ravel()
+    
+    # ============================================================
+# KS TEST (Overtraining Check)
+# ============================================================
+
+ks_sig = ks_2samp(
+    ptr[ytr == 1],
+    pte[yte == 1]
+)
+
+ks_bkg = ks_2samp(
+    ptr[ytr == 0],
+    pte[yte == 0]
+)
+
+print("\n========== KS TEST ==========")
+print(f"Signal KS statistic = {ks_sig.statistic:.4f}")
+print(f"Signal p-value      = {ks_sig.pvalue:.4f}")
+print(f"Background KS statistic = {ks_bkg.statistic:.4f}")
+print(f"Background p-value      = {ks_bkg.pvalue:.4f}")
     
 class TorchModelWrapper(BaseEstimator, ClassifierMixin):
 
@@ -669,6 +748,14 @@ plt.hist(pte[yte == 1], bins=bins, density=True, histtype="step", linestyle="--"
 plt.hist(pte[yte == 0], bins=bins, density=True, histtype="step", linestyle="--", linewidth=2, label="Background (Test)")
 plt.xlabel("DNN score")
 plt.ylabel("Normalized events")
+plt.text(
+    0.05,
+    0.95,
+    f"Signal KS p = {ks_sig.pvalue:.3f}\nBackground KS p = {ks_bkg.pvalue:.3f}",
+    transform=plt.gca().transAxes,
+    verticalalignment="top",
+    bbox=dict(facecolor="white", alpha=0.8)
+)
 plt.legend()
 plt.tight_layout()
 plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/Overtraining_Check_2024.png", dpi=300)
@@ -687,6 +774,79 @@ plt.ylabel("True Positive Rate")
 plt.legend()
 plt.tight_layout()
 plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/ROC_2024.png", dpi=300)
+plt.close()
+
+# ============================================================
+# Precision-Recall Curve
+# ============================================================
+
+precision, recall, _ = precision_recall_curve(
+    yte,
+    pte,
+    sample_weight=wtrain_te
+)
+
+ap = average_precision_score(
+    yte,
+    pte,
+    sample_weight=wtrain_te
+)
+
+plt.figure(figsize=(7,6))
+plt.plot(recall, precision,
+         linewidth=2,
+         label=f"AP = {ap:.3f}")
+
+plt.xlabel("Recall")
+plt.ylabel("Precision")
+plt.title("Precision-Recall Curve")
+plt.grid(alpha=0.3)
+plt.legend()
+
+plt.savefig(
+"/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/PR_Curve_2024.png",
+dpi=300)
+
+plt.close()
+
+# ============================================================
+# Calibration Curve
+# ============================================================
+
+prob_true, prob_pred = calibration_curve(
+    yte,
+    pte,
+    n_bins=10,
+    strategy="uniform"
+)
+
+plt.figure(figsize=(6,6))
+
+plt.plot(
+    prob_pred,
+    prob_true,
+    "o-",
+    linewidth=2,
+    label="DNN"
+)
+
+plt.plot(
+    [0,1],
+    [0,1],
+    "k--",
+    label="Perfect calibration"
+)
+
+plt.xlabel("Mean predicted probability")
+plt.ylabel("Fraction of positives")
+plt.title("Calibration Curve")
+plt.legend()
+plt.grid(alpha=0.3)
+
+plt.savefig(
+"/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/Calibration_2024.png",
+dpi=300)
+
 plt.close()
 
 print("\nAll plots generated and saved successfully!")
@@ -895,3 +1055,127 @@ for name, imp, err in zip(
     importance_std,
 ):
     print(f"{name:20s} {imp:.6f} ± {err:.6f}")
+    
+plt.figure(figsize=(7,6))
+
+plt.hist(
+    X[y==1,11],
+    bins=50,
+    weights=np.abs(w_physics[y==1]),
+    histtype="step",
+    density=True,
+    linewidth=2,
+    label="Signal"
+)
+
+plt.hist(
+    X[y==0,11],
+    bins=50,
+    weights=np.abs(w_physics[y==0]),
+    histtype="step",
+    density=True,
+    linewidth=2,
+    label="Background"
+)
+
+plt.xlabel(r"$m_{jj}$ (GeV)")
+plt.ylabel("Normalized Events")
+plt.title(r"$m_{jj}$ (GeV), 2024")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/mjj_2024.pdf")
+plt.close()
+
+plt.figure(figsize=(7,6))
+
+plt.hist(
+    X[y==1,10],
+    bins=40,
+    weights=np.abs(w_physics[y==1]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Signal"
+)
+
+plt.hist(
+    X[y==0,10],
+    bins=40,
+    weights=np.abs(w_physics[y==0]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Background"
+)
+
+plt.xlabel(r"$\Delta\eta_{jj}$")
+plt.ylabel("Normalized Events")
+plt.title(r"$\Delta\eta_{jj}$, 2024")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/deta_2024.pdf")
+plt.close()
+
+plt.figure(figsize=(7,6))
+
+plt.hist(
+    mll_all[y==1],
+    bins=40,
+    weights=np.abs(w_physics[y==1]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Signal"
+)
+
+plt.hist(
+    mll_all[y==0],
+    bins=40,
+    weights=np.abs(w_physics[y==0]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Background"
+)
+
+plt.xlabel(r"$m_{\mu\mu}$ (GeV)")
+plt.ylabel("Normalized Events")
+plt.title(r"$m_{\mu\mu}$ (GeV), 2024")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/mll_2024.pdf")
+plt.close()
+
+plt.figure(figsize=(7,6))
+
+plt.hist(
+    X[y==1,0],
+    bins=50,
+    weights=np.abs(w_physics[y==1]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Signal"
+)
+
+plt.hist(
+    X[y==0,0],
+    bins=50,
+    weights=np.abs(w_physics[y==0]),
+    density=True,
+    histtype="step",
+    linewidth=2,
+    label="Background"
+)
+
+plt.xlabel(r"Leading $\mu$ $p_T$ (GeV)")
+plt.ylabel("Normalized Events")
+plt.title(r"Leading $\mu$ $p_T$ (GeV), 2024")
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plot/leadMuonPt_2024.pdf")
+plt.close()
