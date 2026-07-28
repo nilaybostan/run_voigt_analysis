@@ -11,21 +11,21 @@ import glob
 
 import matplotlib.pyplot as plt
 
-
+import datetime
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-MODEL_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/best_model_2024.pth"
-SCALER_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/scaler_2024.pkl"
-THRESHOLD_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/threshold_2024.json"
+MODEL_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/best_model_pre2022.pth"
+SCALER_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/scaler_pre2022.pkl"
+THRESHOLD_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/threshold_pre2022.json"
 
-OUTPUT_FILE = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/Data_DNNScore_2024.root"
+OUTPUT_FILE = "/eos/user/n/nbostan/plots/Data_DNNScore_pre2022.root"
 
 
-PLOT_DIR = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_BDT_DNN/large_BDT/plots/"
-
+PLOT_DIR = "/eos/user/n/nbostan/plots/"
+SUMMARY_FILE = PLOT_DIR + "DNN_summary_pre2022.txt"
 
 
 # ============================================================
@@ -33,7 +33,7 @@ PLOT_DIR = "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/condor_
 # ============================================================
 
 
-DATA_FILES = ["root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/677e3bb0-8199-4ffb-83af-165410a7b7a6.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/a4a34841-e26f-455c-8984-06703b2e23d7.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/94b5a3dc-54ea-418a-8fa3-41a9e38e2cf2.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/9be46da1-631e-409a-9218-075ea4537cad.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/13bdae97-f65a-418b-aed8-2ec264d42be0.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/390b1d89-09d1-406f-8f6c-417d59419d65.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/d26e3d05-22e5-4e89-ab02-98181acd50f2.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/fb8a66c0-e9e8-4ddf-8810-5f5b71ebe1fe.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/8c8ea958-4a49-41cc-89cd-9fd583500f9c.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/fc9f1c1a-6699-4d70-a04b-40d501ad4373.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/3622c672-ed80-448e-8e8f-58a65506166f.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/3343ce06-8bfa-49a9-a2f4-276504e26307.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/ab7c36e4-66c9-481b-8d88-114ab2c818ac.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/202efc0a-927a-475a-b4b6-7ed9aabad668.root","root://cms-xrd-global.cern.ch//store/data/Run2024C/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/e2546003-cca7-4229-a540-d56b807399c9.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/59956cf4-d632-4fa4-b930-4483e7a7f81c.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/9ab649c7-bdb6-46f9-9b76-74f61e40fa47.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/d190f0d2-d9a1-4ddf-9431-5f3943fb49a8.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/cc76ab1f-6a2f-4ca6-a393-f2fe16a4bd8d.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/713cc4ef-72a3-4cce-8dd6-8d24c080ddd3.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/030d0310-0476-45ff-87b6-4752bdfac00d.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/a7b201ca-7c2e-4974-8712-d32d7a04f396.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/bc389e26-d603-4978-b3b0-17cb627ed052.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/b605eb6f-4b88-4ee0-bd9a-c0a7e4576eb5.root","root://cms-xrd-global.cern.ch//store/data/Run2024D/Muon0/NANOAOD/MINIv6NANOv15-v1/110000/6c28d2ba-a32f-4661-a1e8-8a743585604f.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/7531adac-d24d-4784-b028-e8b988bc578c.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/6423ef94-41bd-426e-ae57-1c9eeee26313.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/612c7579-9520-4132-8a9f-051637fe6bae.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/4a99092d-5b9e-4c98-965b-1f81eda5fb8e.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2810000/b9fc5dcd-10af-48c1-bc75-7880d0fcef9e.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2810000/df135a40-af5a-42f8-a270-3cb7c0bb6d1d.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2810000/76078b63-6241-467d-80cc-05d316fcefe5.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/c8ecc5bf-d3c8-4135-9496-5f72ced2c15d.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/30f91c56-9c39-4349-a37d-cd292c3502f6.root","root://cms-xrd-global.cern.ch//store/data/Run2024E/Muon0/NANOAOD/MINIv6NANOv15-v1/2520000/c679b348-9bc0-444a-b49e-58f28274e085.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/7f4a3771-0ef4-4a84-a530-a0d4574056d4.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/4eda15c6-786a-4381-bead-7b5d18c41a2c.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/e1fd7044-4993-4469-8258-55bd6ddeb1b2.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/9af32129-aef3-424e-b2ef-36689fd0e506.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/a4a69c55-2f56-4787-9695-93d59744e431.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/6ba191d0-8e16-4f87-9483-4b9e11d1ccc9.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/6ac104c1-e2ef-409d-8c1d-ace5167a32f3.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/d4e5ef15-36a1-4e54-92e8-35f446a41aa1.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/fbef915c-0469-47cf-830e-70938dcdd3d7.root","root://cms-xrd-global.cern.ch//store/data/Run2024F/Muon0/NANOAOD/MINIv6NANOv15-v1/2530000/71250f00-226c-4b83-87fe-1ae5ca0db899.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/03f2d829-00be-4c48-8d87-49ffc6825a92.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/4a74a403-1653-4ac5-8896-ab6f961ad32b.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/f8bd4af4-689e-48bd-a32f-49d119937bfb.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/ef1e01fd-e68e-4388-a91e-b720e9ea8046.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/fd29aa87-bc34-468a-963f-452e30a621bb.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/ac50650d-bf19-483d-8bfe-1bd8ab35877e.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/c6c64c05-c964-4f58-8aab-08e17749342a.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/a39769ef-fffa-44e7-b8e5-b088662dc28c.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/9fb277a0-8828-4b7e-93a8-89dfcc1486fb.root","root://cms-xrd-global.cern.ch//store/data/Run2024G/Muon0/NANOAOD/MINIv6NANOv15-v1/2540000/5bac465c-7c4a-4342-ba02-56248f756e0c.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/244fa588-5f93-4a47-b711-32b5ded4852d.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/0aab5444-026c-4ac7-a629-59cf11182aee.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/22d6e4c3-1aa2-4162-ada3-05869758bc62.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/c11fb5b7-a95f-4c89-9cde-2324a10e086e.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/7235c962-57ea-434a-812f-ab2dae5d51c8.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/420235c8-4adc-47ae-affa-0cfc85beb125.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/3799ec42-aabf-4a85-8fec-f6628d8e1dd2.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/eb6a523d-6ff4-4c39-96b5-b3e026673849.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/406d9ec2-1a07-4bb8-a73b-87c779282ed5.root","root://cms-xrd-global.cern.ch//store/data/Run2024H/Muon0/NANOAOD/MINIv6NANOv15-v1/90000/6b2ba2fa-224e-4918-bfd6-3a7d21b305f4.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/6c392d88-b78b-42bb-a6af-44746fdcff11.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/21d16008-96bc-4096-82b8-2247844dfc8e.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/47d3b12b-ab93-41c0-a284-e5dc0c848047.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/a86c55a7-cb18-4ec3-a321-ec5aded80dee.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/a0d2f532-14d2-4f53-b94a-6ef65b2d8faa.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/d1d401cf-0635-488c-8d4d-9c3b17543a12.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/ad5a3efe-9b4e-4228-a33f-bc7eeb8c4cd1.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/83560a0d-1b88-4640-808f-ef7a0a6dd34f.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/448fbb8f-4534-4636-863b-58ede98b5bbf.root","root://cms-xrd-global.cern.ch//store/data/Run2024I/Muon0/NANOAOD/MINIv6NANOv15_v2-v1/2530000/77ff9f7e-9f5f-4484-b98c-9e4dbeaa17e3.root"
+DATA_FILES = ["root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/99577992-2ea3-4ad3-8e87-69351341b12d.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/e664be04-0621-4ca2-889f-869dde5b763b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/f1bfe9dc-259c-4a11-b436-749e6a18ddea.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/f0eb2bf9-d610-4c81-9fdd-07b7fd247cf4.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/3220e70c-61a7-4dbb-a479-ce1d0948976c.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/ab62ccfc-efcb-49ed-8334-ce8d716be234.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/30824fd2-bbc1-4c06-bc29-4214d534be48.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/c4c82c99-25e6-4bb7-9976-b1c814811665.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/257de6b5-ad85-43cb-b40e-24e209040b41.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/69f9d1c8-e490-49f7-b59a-99ab2f643ac4.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/f4488c49-5873-49d1-96d8-6ce84b4e8aeb.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/5c373a95-ef61-4784-ac8d-be899595d681.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/a235b9ac-0342-472b-97ec-15fceac0fada.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/e100ae34-ca16-41bc-8004-59f0e82ee94b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/dd091748-99e0-4d48-8ab3-0fbe4544f07b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/164fbe32-be2c-49b2-b58f-9fc0c8fec268.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/4cea3500-9607-4e91-9fb4-cc71ef2eb3df.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/41b17077-d6f4-4655-83b3-b7222ab9e06d.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/8cae1ae4-639a-49ec-b2cc-26cbb5ef14e2.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/8bcece20-cd24-4d35-85eb-8bd8d7d8f3c3.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/765717a9-da8a-4eaf-afe3-17a8dad9621b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/9a7df399-4e8d-41c6-8b65-98dafad7a871.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/0f7e88f4-95ce-431e-8f01-40480a2ac878.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/019b0054-1684-410d-9fb2-837f92da4956.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/Muon/NANOAOD/16Dec2023-v1/2550000/ad6b4e1d-acf1-4a58-85f0-47c521787684.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/57749259-0917-494b-b140-0ea02999b16f.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/f6fd2850-c736-4720-b274-96f75408fa35.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/3b6ba063-4f81-44e5-934c-4f301724e5bc.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/2e7fd442-fded-42be-abc0-30f01d30e56e.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/e040babe-5669-471e-af11-f0a8c0c8575c.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/ba50071d-3700-4e09-be47-b96fc36ea58c.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/a85eb637-9ea7-4f6b-b14a-cacec9ae6e4a.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/0a0b3638-91b0-481f-80e8-5db38c1f9961.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/9255782a-4e41-43df-9f4a-cf3c46b3527a.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/46ff4e59-985f-4f63-9266-92f1de0b4cd7.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/20ad69d6-a37e-420a-a396-0932b49e2f0b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/31f18b8a-334f-41a9-83a9-77f9723b896f.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/4d0327f8-4bb5-478a-a300-83e8686eab5b.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/578b7213-edd2-4821-9e19-318603197cf8.root","root://cms-xrd-global.cern.ch//store/data/Run2022C/SingleMuon/NANOAOD/16Dec2023-v1/50000/2dd3054f-bf93-48d8-a6a5-8e5d89806ca8.root","root://cms-xrd-global.cern.ch//store/data/Run2022D/Muon/NANOAOD/16Dec2023-v1/50000/c9f48dfb-f13b-43b9-8705-b319d1aaf0bf.root","root://cms-xrd-global.cern.ch//store/data/Run2022D/Muon/NANOAOD/16Dec2023-v1/50000/6a06a004-a6c8-4875-bd6f-0286fb249bde.root","root://cms-xrd-global.cern.ch//store/data/Run2022D/Muon/NANOAOD/16Dec2023-v1/50000/1ab7fa69-c84a-47e4-93e6-6d3f78936c74.root"
 ]
 
 
@@ -177,8 +177,8 @@ branches=[
 "Muon_eta",
 "Muon_phi",
 
-"PuppiMET_pt",
-"PuppiMET_phi",
+"MET_pt",
+"MET_phi",
 
 "Jet_pt",
 "Jet_eta",
@@ -388,14 +388,14 @@ ak.to_numpy(mu2eta),
 
 ak.to_numpy(dR),
 
-ak.to_numpy(data.PuppiMET_pt),
+ak.to_numpy(data.MET_pt),
 
 np.sin(
-ak.to_numpy(data.PuppiMET_phi)
+ak.to_numpy(data.MET_phi)
 ),
 
 np.cos(
-ak.to_numpy(data.PuppiMET_phi)
+ak.to_numpy(data.MET_phi)
 ),
 
 ak.to_numpy(j1pt),
@@ -498,7 +498,30 @@ with uproot.recreate(
 print("Saved:",OUTPUT_FILE)
 
 
+# ============================================================
+# SUMMARY VARIABLES
+# ============================================================
 
+total_events = len(data)
+
+selected_events = np.sum(sel)
+
+passing_events = np.sum(DNN_pass)
+
+selection_efficiency = (
+    100.0 * selected_events / total_events
+    if total_events > 0 else 0.0
+)
+
+passing_efficiency = (
+    100.0 * passing_events / selected_events
+    if selected_events > 0 else 0.0
+)
+
+overall_efficiency = (
+    100.0 * passing_events / total_events
+    if total_events > 0 else 0.0
+)
 
 # ============================================================
 # PLOTS
@@ -528,14 +551,14 @@ plt.hist(
     linewidth=2
 )
 
-plt.yscale("log") 
+#plt.yscale("log") 
 plt.xlabel("DNN score")
 plt.ylabel("Events")
 
 plt.grid(alpha=0.3)
 
 plt.savefig(
-PLOT_DIR+"DNNScore_Data_2024.png",
+PLOT_DIR+"DNNScore_Data_pre2022.png",
 dpi=300
 )
 
@@ -565,7 +588,7 @@ linestyle="--",
 label=f"Threshold={threshold:.3f}"
 )
 
-plt.yscale("log") 
+#plt.yscale("log") 
 plt.xlabel("DNN score")
 plt.ylabel("Events")
 
@@ -575,7 +598,7 @@ plt.grid(alpha=0.3)
 
 
 plt.savefig(
-PLOT_DIR+"DNNScore_Data_Threshold_2024.png",
+PLOT_DIR+"DNNScore_Data_Threshold_pre2022.png",
 dpi=300
 )
 
@@ -600,12 +623,12 @@ np.sum(DNN_pass)
 )
 
 
-plt.yscale("log") 
+#plt.yscale("log") 
 plt.xlabel("DNN Selection")
 plt.ylabel("Events")
 
 plt.savefig(
-PLOT_DIR+"DNNPass_2024.png",
+PLOT_DIR+"DNNPass_pre2022.png",
 dpi=300
 )
 
@@ -618,66 +641,89 @@ plt.close()
 # ------------------------------------------------------------
 
 
-plots=[
+mll_np = ak.to_numpy(mll)
+
+blind_sel = sel & ~((mll_np > 115) & (mll_np < 135))
+
+plots = [
 
     (
-        mll,
-        "$m_{\\mu\\mu}$ (GeV)",
-        "mll_Data_2024.png"
+        ak.to_numpy(mll[blind_sel]),
+        r"$m_{\mu\mu}$ (GeV)",
+        "mll_Data_pre2022.png",
+        (110, 150),
+        40
     ),
 
     (
-        mjj,
-        "$m_{jj}$ (GeV)",
-        "mjj_Data_2024.png"
+        ak.to_numpy(mll[sel]),
+        r"$m_{\mu\mu}$ (GeV)",
+        "mll_Data_pre2022_full.png",
+        (0, 200),
+        55
     ),
 
     (
-        dEta_jj,
-        "$\\Delta\\eta_{jj}$",
-        "DeltaEtaJJ_Data_2024.png"
+        mjj[sel],
+        r"$m_{jj}$ (GeV)",
+        "mjj_Data_pre2022.png",
+        (0, 2000),
+        50
+    ),
+
+    (
+        dEta_jj[sel],
+        r"$\Delta\eta_{jj}$",
+        "DeltaEtaJJ_Data_pre2022.png",
+        (0, 10),
+        100
     ),
 
     (
         ak.to_numpy(mu1pt[sel]),
-        "Leading muon pT",
-        "MuonPt1_Data_2024.png"
+        "Leading muon $p_T$ (GeV)",
+        "MuonPt1_Data_pre2022.png",
+        (0, 200),
+        40
     ),
 
     (
         ak.to_numpy(mu2pt[sel]),
-        "Subleading muon pT",
-        "MuonPt2_Data_2024.png"
+        "Subleading muon $p_T$ (GeV)",
+        "MuonPt2_Data_pre2022.png",
+        (0, 200),
+        40
     )
 
 ]
 
-
-
-for values,xlabel,name in plots:
-
+for values, xlabel, name, xrange, bins in plots:
 
     plt.figure(figsize=(7,6))
 
-
     plt.hist(
         values,
-        bins=50,
+        bins=bins,
+        range=xrange,
         histtype="step",
         linewidth=2
     )
 
+    #plt.yscale("log")
+    plt.ylim(0.8, None)          # <-- buraya
+    plt.minorticks_on()          # <-- buraya
 
     plt.xlabel(xlabel)
     plt.ylabel("Events")
 
-    plt.grid(alpha=0.3)
+    plt.grid(which="both", alpha=0.3)   # <-- buraya
 
     plt.tight_layout()
 
     plt.savefig(
-        PLOT_DIR+name,
-        dpi=300
+        PLOT_DIR + name,
+        dpi=300,
+        bbox_inches="tight"
     )
 
     plt.close()
@@ -685,3 +731,42 @@ for values,xlabel,name in plots:
 
 
 print("\nAll plots produced successfully!")
+
+# ============================================================
+# SAVE SUMMARY REPORT
+# ============================================================
+
+try:
+
+    with open(SUMMARY_FILE, "w") as f:
+
+        f.write("=====================================================\n")
+        f.write("         PyTorch DNN Application Summary\n")
+        f.write("=====================================================\n\n")
+
+        f.write(f"Date : {datetime.datetime.now()}\n\n")
+
+        f.write("INPUT INFORMATION\n")
+        f.write("-----------------------------\n")
+
+        f.write(f"Input ROOT files          : {len(DATA_FILES)}\n")
+        f.write(f"Total events read         : {total_events:,}\n")
+        f.write(f"Selected events           : {selected_events:,}\n")
+        f.write(f"Selection efficiency (%)  : {selection_efficiency:.3f}\n\n")
+
+
+        f.write("DNN INFORMATION\n")
+        f.write("-----------------------------\n")
+
+        f.write(f"DNN threshold             : {threshold:.6f}\n")
+        f.write(f"Events passing DNN        : {passing_events:,}\n")
+        f.write(f"DNN efficiency (%)        : {passing_efficiency:.3f}\n")
+
+
+    print(f"Summary written to {SUMMARY_FILE}")
+
+
+except Exception as e:
+
+    print("ERROR writing summary:")
+    print(e)
