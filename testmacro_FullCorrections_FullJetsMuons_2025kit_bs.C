@@ -420,5 +420,5 @@ jets.push_back(jet);
 
     out.Close();
 
-    std::cout << "✔ Finished: DATA-only macro with beam-spot muons added" << std::endl;
+    std::cout << " Finished: DATA-only macro with beam-spot muons added" << std::endl;
 }
