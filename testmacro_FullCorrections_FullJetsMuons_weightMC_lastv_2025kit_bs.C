@@ -369,5 +369,5 @@ double pt2 = ptCorr[probe];
         h->Write();
     out.Close();
 
-    std::cout << "✔ Finished — beam-spot muons added, physics unchanged" << std::endl;
+    std::cout << " Finished — beam-spot muons added, physics unchanged" << std::endl;
 }
