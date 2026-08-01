@@ -1,6 +1,5 @@
 // ============================================================================
 // FULL ANALYSIS MACRO — DATA ONLY
-// ROOT ONLY, KIT TEXT MUON CORRECTIONS PRESENT BUT INACTIVE
 // NO correctionlib, SAME SELECTIONS
 // + BEAM-SPOT MUON INFORMATION ADDED (NO OTHER CHANGE)
 // ============================================================================
@@ -115,10 +114,10 @@ void testmacro_FullCorrections_FullJetsMuons_2025kit_bs(
         "src/RoccoR/post2022E-update/jetid.txt"
     );
 
-    // =========================================================================
-    // HISTOGRAMS (UNCHANGED)
-    // =========================================================================
-    TH1F *h_mass        = new TH1F("h_mass","Dimuon mass",100,0,200);
+// =========================================================================
+// HISTOGRAMS (UNCHANGED)
+// =========================================================================
+TH1F *h_mass        = new TH1F("h_mass","Dimuon mass",100,0,200);
 TH1F *h_dimuonPt    = new TH1F("h_dimuonPt","Dimuon pT",100,0,200);
 TH1F *h_dimuonEta   = new TH1F("h_dimuonEta","Dimuon eta",50,-2.5,2.5);
 TH1F *h_leadJetPt   = new TH1F("h_leadJetPt","Leading jet pT",100,0,200);
@@ -166,7 +165,7 @@ for (auto h : {
     TTreeReaderArray<int>   Muon_charge(reader,"Muon_charge");
     TTreeReaderArray<bool>  Muon_mediumID(reader,"Muon_mediumId");
     
-    // =====================================================================
+// =====================================================================
 // TRIGGER OBJECTS
 // =====================================================================
 
@@ -219,7 +218,7 @@ TTreeReaderArray<UShort_t> TrigObj_id(reader, "TrigObj_id");
         }
         // ========================================================
 
-       // =====================================================================
+// =====================================================================
 // MUON BASELINE SELECTION
 // BOTH MUONS: pT >= 20, |eta| < 2.4, Medium ID, Loose Iso
 // =====================================================================
@@ -338,7 +337,7 @@ double pt2 = ptCorr[probeIdx];
             if (corrPt < 20.0) continue;
 	    if (fabs(Jet_eta[j]) > 4.7) continue;
 
-            TLorentzVector jet;
+TLorentzVector jet;
 jet.SetPtEtaPhiM(
     corrPt,
     Jet_eta[j],
