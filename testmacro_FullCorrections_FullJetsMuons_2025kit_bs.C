@@ -1,11 +1,4 @@
-// ============================================================================
-// FULL ANALYSIS MACRO — DATA ONLY
-// NO correctionlib, SAME SELECTIONS
-// + BEAM-SPOT MUON INFORMATION ADDED (NO OTHER CHANGE)
-// ============================================================================
-
 #include "JetCorrections.h"
-
 #include <TRandom.h>
 #include <TChain.h>
 #include <TError.h>
@@ -23,6 +16,10 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <map>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 // ============================================================================
 // STRUCTURES & HELPERS (UNCHANGED)
@@ -47,6 +44,64 @@ std::vector<MuonScale> readMuonScale(const std::string& filename) {
         table.push_back(b);
     }
     return table;
+}
+
+// ============================================================================
+// GOLDEN JSON
+// ============================================================================
+
+std::map<unsigned int,
+         std::vector<std::pair<unsigned int,unsigned int>>> goodLumis;
+
+void LoadGoldenJSON(const std::string& filename)
+{
+    goodLumis.clear();
+
+    std::ifstream in(filename);
+
+    if (!in.is_open()) {
+        std::cerr << "Cannot open Golden JSON: "
+                  << filename << std::endl;
+        exit(1);
+    }
+
+    json j;
+    in >> j;
+
+    for (auto& item : j.items()) {
+
+        unsigned int run = std::stoul(item.key());
+
+        for (auto const& range : item.value()) {
+
+            unsigned int first = range[0];
+            unsigned int last  = range[1];
+
+            goodLumis[run].push_back({first,last});
+        }
+    }
+
+    std::cout << "Loaded Golden JSON with "
+              << goodLumis.size()
+              << " runs." << std::endl;
+}
+
+bool PassGoldenJSON(unsigned int run,
+                    unsigned int lumi)
+{
+    auto it = goodLumis.find(run);
+
+    if (it == goodLumis.end())
+        return false;
+
+    for (const auto& r : it->second) {
+
+        if (lumi >= r.first &&
+            lumi <= r.second)
+            return true;
+    }
+
+    return false;
 }
 
 // ============================================================================
@@ -87,7 +142,7 @@ double deltaR(
 // ============================================================================
 // MAIN ANALYSIS — DATA ONLY
 // ============================================================================
-void testmacro_FullCorrections_FullJetsMuons_2025kit_bs(
+void testmacro_FullCorrections_FullJetsMuons_2025kit_bs_golden(
     std::vector<std::string> inputFiles,
     bool isData = true,
     const std::string& KITDir =
@@ -106,18 +161,17 @@ void testmacro_FullCorrections_FullJetsMuons_2025kit_bs(
     // JET CORRECTIONS
     // =========================================================================
      JetCorrections jetCorr(
-        "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/"
-        "src/RoccoR/post2022E-update/jet_jerc.txt",
-         "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/"
-        "src/RoccoR/post2022E-update/jetvetomaps.txt",
-        "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/"
-        "src/RoccoR/post2022E-update/jetid.txt"
-    );
+    "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/post2022E-update/jet_jerc.txt",
+    "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/post2022E-update/jetid.txt",
+    "/afs/cern.ch/user/n/nbostan/new_CMS/CMSSW_14_0_18/src/RoccoR/post2022E-update/jetvetomaps.txt"
+   );
+ 
+    LoadGoldenJSON("/cvmfs/cms-griddata.cern.ch/cat/metadata/DC/Collisions25/latest/Cert_Collisions2025_391658_398903_Muon.json");
 
-// =========================================================================
-// HISTOGRAMS (UNCHANGED)
-// =========================================================================
-TH1F *h_mass        = new TH1F("h_mass","Dimuon mass",100,0,200);
+    // =========================================================================
+    // HISTOGRAMS (UNCHANGED)
+    // =========================================================================
+    TH1F *h_mass        = new TH1F("h_mass","Dimuon mass",100,0,200);
 TH1F *h_dimuonPt    = new TH1F("h_dimuonPt","Dimuon pT",100,0,200);
 TH1F *h_dimuonEta   = new TH1F("h_dimuonEta","Dimuon eta",50,-2.5,2.5);
 TH1F *h_leadJetPt   = new TH1F("h_leadJetPt","Leading jet pT",100,0,200);
@@ -155,7 +209,11 @@ for (auto h : {
     // =========================================================================
     TTreeReader reader(&chain);
 
-    TTreeReaderValue<bool>  HLT_IsoMu24(reader,"HLT_IsoMu24");
+    TTreeReaderValue<UInt_t> run(reader,"run");
+    TTreeReaderValue<UInt_t> luminosityBlock(reader,"luminosityBlock");
+
+    TTreeReaderValue<bool> HLT_IsoMu24(reader,"HLT_IsoMu24");
+
 
     TTreeReaderValue<int> nMuon(reader,"nMuon");
     TTreeReaderArray<float> Muon_pt(reader,"Muon_pt");
@@ -165,7 +223,7 @@ for (auto h : {
     TTreeReaderArray<int>   Muon_charge(reader,"Muon_charge");
     TTreeReaderArray<bool>  Muon_mediumID(reader,"Muon_mediumId");
     
-// =====================================================================
+    // =====================================================================
 // TRIGGER OBJECTS
 // =====================================================================
 
@@ -176,9 +234,11 @@ TTreeReaderArray<float> TrigObj_phi(reader, "TrigObj_phi");
 
 TTreeReaderArray<UShort_t> TrigObj_id(reader, "TrigObj_id");
 
-// Remove this if unused
-// TTreeReaderArray<ULong64_t> TrigObj_filterBits(reader, "TrigObj_filterBits");
-//TTreeReaderArray<unsigned int> TrigObj_filterBits(reader, "TrigObj_filterBits");
+TTreeReaderArray<ULong64_t>* TrigObj_filterBits = nullptr;
+
+if (chain.GetBranch("TrigObj_filterBits"))
+    TrigObj_filterBits =
+        new TTreeReaderArray<ULong64_t>(reader,"TrigObj_filterBits");
 
     // ===================== BEAM-SPOT ADDITION =====================
     TTreeReaderArray<float> Muon_bsConstrainedPt(reader,"Muon_bsConstrainedPt");
@@ -197,28 +257,62 @@ TTreeReaderArray<UShort_t> TrigObj_id(reader, "TrigObj_id");
         Jet_btag = new TTreeReaderArray<float>(reader,"Jet_btagDeepFlavB");
     else if (chain.GetBranch("Jet_btagDeepB"))
         Jet_btag = new TTreeReaderArray<float>(reader,"Jet_btagDeepB");
+        
+        
+   // =========================================================================
+// CUT FLOW COUNTERS
+// =========================================================================
+long long nTotal      = 0;
+long long nGolden     = 0;
+long long nTrigger    = 0;
+long long nTwoMuon    = 0;
+long long nMuonSel    = 0;
+long long nTrigMatch  = 0;
+long long nFinal      = 0;     
 
     // =========================================================================
     // EVENT LOOP — DATA
     // =========================================================================
     while (reader.Next()) {
 
-        if (!(*HLT_IsoMu24)) continue;
-        if (*nMuon != 2) continue;
+    nTotal++;
 
-        double w = 1.0;
+    if (isData) {
 
-        // ===================== BEAM-SPOT PT =====================
-        std::vector<float> pt_bs(*nMuon);
-        for (int i = 0; i < *nMuon; i++) {
-            if (Muon_bsConstrainedChi2[i] < 30)
-                pt_bs[i] = Muon_bsConstrainedPt[i];
-            else
-                pt_bs[i] = Muon_pt[i];
-        }
+        if (!PassGoldenJSON(*run, *luminosityBlock))
+            continue;
+
+        nGolden++;
+    }
+
+
+    if (!(*HLT_IsoMu24))
+        continue;
+
+    nTrigger++;
+
+
+    if (*nMuon != 2)
+        continue;
+
+    nTwoMuon++;
+
+
+    double w = 1.0;
+
+    // ===================== BEAM-SPOT PT =====================
+    std::vector<float> pt_bs(*nMuon);
+
+    for (int i = 0; i < *nMuon; i++) {
+
+        if (Muon_bsConstrainedChi2[i] < 30)
+            pt_bs[i] = Muon_bsConstrainedPt[i];
+        else
+            pt_bs[i] = Muon_pt[i];
+    }
         // ========================================================
 
-// =====================================================================
+       // =====================================================================
 // MUON BASELINE SELECTION
 // BOTH MUONS: pT >= 20, |eta| < 2.4, Medium ID, Loose Iso
 // =====================================================================
@@ -249,6 +343,8 @@ for (int i = 0; i < 2; i++) {
 
 if (!passMuonSelection)
     continue;
+
+nMuonSel++;
 
 
 // =====================================================================
@@ -288,12 +384,26 @@ for (int itrig = 0; itrig < *nTrigObj; itrig++) {
     if (TrigObj_id[itrig] != 13)
         continue;
 
+
+    // Require muon trigger filter
+  bool passMuonFilter = false;
+
+if (TrigObj_filterBits) {
+    passMuonFilter =
+        ((*TrigObj_filterBits)[itrig] & (1ULL << 3));
+}
+
+if (!passMuonFilter)
+    continue;
+
+
     double dR = deltaR(
         Muon_eta[tagIdx],
         Muon_phi[tagIdx],
         TrigObj_eta[itrig],
         TrigObj_phi[itrig]
     );
+
 
     if (dR < 0.1) {
         triggerMatched = true;
@@ -303,6 +413,8 @@ for (int itrig = 0; itrig < *nTrigObj; itrig++) {
 
 if (!triggerMatched)
     continue;
+
+nTrigMatch++;
 
 // =====================================================================
 // OPPOSITE SIGN
@@ -319,6 +431,8 @@ double pt2 = ptCorr[probeIdx];
         m2.SetPtEtaPhiM(pt2, Muon_eta[probeIdx], Muon_phi[probeIdx], 0.105);
 
         TLorentzVector dimuon = m1 + m2;
+        
+        nFinal++;
 
         h_mass->Fill(dimuon.M(), w);
         h_dimuonPt->Fill(dimuon.Pt(), w);
@@ -337,13 +451,16 @@ double pt2 = ptCorr[probeIdx];
             if (corrPt < 20.0) continue;
 	    if (fabs(Jet_eta[j]) > 4.7) continue;
 
-TLorentzVector jet;
+            TLorentzVector jet;
 jet.SetPtEtaPhiM(
     corrPt,
     Jet_eta[j],
     Jet_phi[j],
     Jet_mass[j]
 );
+
+ if (!jetCorr.passJetID(jet))
+        continue;
 
 // Jet-muon overlap veto
 if (jet.DeltaR(m1) <= 0.4)
@@ -356,12 +473,21 @@ jets.push_back(jet);
 
             h_jetPtCorr->Fill(corrPt, w);
 
-            if (Jet_btag) {
-                float b = (*Jet_btag)[j];
-                if (b > 0.2783) nMedB++;
-                else if (b > 0.0490) nLooseB++;
-            }
-        }
+          if (Jet_btag) {
+
+    float b = (*Jet_btag)[j];
+
+    if (b > 0.2783)
+{
+    nMedB++;
+}
+else if (b > 0.0490)
+{
+    nLooseB++;
+}
+
+}
+}
 
         std::sort(jets.begin(), jets.end(),
                   [](auto& a, auto& b){ return a.Pt() > b.Pt(); });
@@ -405,7 +531,7 @@ jets.push_back(jet);
     // =========================================================================
     // OUTPUT
     // =========================================================================
-    TFile out("/eos/user/n/nbostan/2025_Samples/output_histos_DATA_2025_F_KIT_bs_test_upd.root","RECREATE");
+    TFile out("/eos/user/n/nbostan/2025_Samples/output_histos_DATA_2025_F_KIT_bs_test_upd_golden.root","RECREATE");
 
     h_mass->Write();
     h_dimuonPt->Write();
@@ -417,8 +543,18 @@ jets.push_back(jet);
     h_jetPtCorr->Write();
     h_mass_VBF->Write();
     h_mass_ggH->Write();
+    
+    
+std::cout << "\n========== CUT FLOW ==========\n";
+std::cout << "Total events     : " << nTotal << std::endl;
+std::cout << "Golden JSON      : " << nGolden << std::endl;
+std::cout << "HLT_IsoMu24      : " << nTrigger << std::endl;
+std::cout << "nMuon == 2       : " << nTwoMuon << std::endl;
+std::cout << "Muon selection   : " << nMuonSel << std::endl;
+std::cout << "Trigger matching : " << nTrigMatch << std::endl;
+std::cout << "Final selected   : " << nFinal << std::endl;
 
     out.Close();
 
-    std::cout << " Finished: DATA-only macro with beam-spot muons added" << std::endl;
+    std::cout << "✔ Finished: DATA-only macro with beam-spot muons added" << std::endl;
 }
