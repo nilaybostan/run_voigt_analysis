@@ -108,9 +108,20 @@ bool PassGoldenJSON(unsigned int run,
 // KIT MUON CORRECTION — DATA RETURNS RAW PT
 // ============================================================================
 double getCorrectedMuonPt(
-    double pt, double /*eta*/,
-    const std::vector<MuonScale>& /*scaleTable*/
+    double pt,
+    double eta,
+    const std::vector<MuonScale>& scaleTable
 ) {
+
+    for (const auto& b : scaleTable) {
+
+        if (pt >= b.ptMin && pt < b.ptMax &&
+            eta >= b.etaMin && eta < b.etaMax)
+        {
+            return pt * b.scale;
+        }
+    }
+
     return pt;
 }
 
@@ -152,10 +163,10 @@ void testmacro_FullCorrections_FullJetsMuons_2025kit_bs_golden(
     gErrorIgnoreLevel = kError;
 
     // =========================================================================
-    // KIT SCALE FILE (READ BUT UNUSED FOR DATA)
+    // KIT SCALE FILE 
     // =========================================================================
     std::vector<MuonScale> muonScale =
-        readMuonScale(KITDir + "muon_Z_2025.txt");
+    readMuonScale(KITDir + "schemaV2_2025.txt");
 
     // =========================================================================
     // JET CORRECTIONS
