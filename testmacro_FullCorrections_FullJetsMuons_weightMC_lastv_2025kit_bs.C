@@ -217,7 +217,7 @@ void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs(
             if (nTruePU) w *= getPUWeight(**nTruePU, puWeights);
         }
 
-// =====================================================================
+        // =====================================================================
 // MUON SELECTION
 // =====================================================================
 
@@ -369,5 +369,5 @@ double pt2 = ptCorr[probe];
         h->Write();
     out.Close();
 
-    std::cout << " Finished — beam-spot muons added, physics unchanged" << std::endl;
+    std::cout << "✔ Finished — beam-spot muons added, physics unchanged" << std::endl;
 }
