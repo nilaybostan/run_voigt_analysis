@@ -337,17 +337,12 @@ double phi
 // ============================================================================
 
 
-double getMCWeight(
-double genWeight
-)
+double getMCWeight(double genWeight)
 {
-
-    if(genWeight>=0)
+    if(genWeight >= 0.0)
         return 1.0;
-
     else
         return -1.0;
-
 }
 
 // ============================================================================
@@ -1000,6 +995,7 @@ if(chain.GetBranch("Jet_hadronFlavour"))
 long long nTotal   = 0;
 long long nTwoMuon = 0;
 long long nMuonSel = 0;
+long long nTrigger = 0;
 long long nFinal   = 0;
 
 while(reader.Next())
@@ -1014,24 +1010,17 @@ while(reader.Next())
     // ========================================================================
 
 
-    double weight = 1.0;
+   double weight = 1.0;
 
-
-
-    if(genWeight.GetSetupStatus()==0)
-    {
-
-        weight =
-        (*genWeight)
-        *
-        normFactor;
-
-    }
-
-
-
-
-
+if(genWeight.GetSetupStatus()==0)
+{
+    weight =
+    getMCWeight(*genWeight)
+    *
+    normFactor;
+}
+    
+   
     // ========================================================================
     // EXACTLY TWO MUONS
     // ========================================================================
@@ -1185,109 +1174,55 @@ if(
 
 
 
-
-
-
 // ============================================================================
 // TRIGGER MATCHING
 // ============================================================================
 
+bool triggerMatched = false;
 
-bool triggerMatched=false;
-
-
-
-
-for(int i=0;i<*nTrigObj;i++)
+for(int i=0; i<*nTrigObj; i++)
 {
+    // Muon trigger object
+    if(TrigObj_id[i] != 13)
+        continue;
 
-
-    if(
-        TrigObj_id[i] != 13
-    )
+    // Trigger muon pT threshold
+    if(TrigObj_pt[i] < 24.)
         continue;
 
 
-
-    if(
-        TrigObj_pt[i] < 24.
-    )
-        continue;
+    // Do NOT apply filterBits for now
+    // Run2025 NanoAOD filter bit needs validation
 
 
-
-
-    if(TrigObj_filterBits)
-    {
-
-        if(
-        (((*TrigObj_filterBits)[i]
-        &
-        (1ULL<<3))
-        ==0)
-        )
-        {
-            continue;
-        }
-
-    }
-
-
-
-
-    double dr0 =
-    deltaR(
-
+    double dr0 = deltaR(
         Muon_eta[0],
         Muon_phi[0],
-
         TrigObj_eta[i],
         TrigObj_phi[i]
-
     );
 
 
-
-    double dr1 =
-    deltaR(
-
+    double dr1 = deltaR(
         Muon_eta[1],
         Muon_phi[1],
-
         TrigObj_eta[i],
         TrigObj_phi[i]
-
     );
 
 
-
-
-    if(
-        dr0 < 0.1 ||
-        dr1 < 0.1
-    )
+    if(dr0 < 0.1 || dr1 < 0.1)
     {
-
-        triggerMatched=true;
-
+        triggerMatched = true;
         break;
-
     }
-
-
 }
-
-
 
 
 if(!triggerMatched)
     continue;
 
-
-
-
-
-
+nTrigger++;
 
 // ============================================================================
 // BUILD MUON FOUR VECTORS
@@ -1959,7 +1894,15 @@ if(isGGH)
 } // while(reader.Next())
 
 
-
+/*
+cout << "==================================" << endl;
+cout << "Total events      = " << nTotal << endl;
+cout << "Two muons         = " << nTwoMuon << endl;
+cout << "Muon selection    = " << nMuonSel << endl;
+cout << "Trigger matched   = " << nTrigger << endl;
+cout << "Final categories  = " << nFinal << endl;
+cout << "==================================" << endl;
+*/
 
 // ============================================================================
 // OUTPUT ROOT FILE
@@ -2093,4 +2036,6 @@ std::cout
 <<"====================================\n";
 
 }
+
+
 
