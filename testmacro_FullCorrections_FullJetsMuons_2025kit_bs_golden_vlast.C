@@ -1231,80 +1231,39 @@ while(reader.Next())
 
     bool triggerMatched=false;
 
+for(int i=0;i<*nTrigObj;i++)
+{
 
-
-    for(int i=0;i<*nTrigObj;i++)
-    {
-
-
-        if(
-            TrigObj_id[i]!=13
-        )
-            continue;
-
-
-
-        if(
-            TrigObj_pt[i]<24.
-        )
-            continue;
-
-
-
-
-        if(TrigObj_filterBits)
-        {
-
-            if(
-            (((*TrigObj_filterBits)[i]
-            &
-            (1ULL<<3))==0)
-            )
-                continue;
-
-        }
-
-
-
-
-        double dr =
-        deltaR(
-
-            Muon_eta[tag],
-
-            Muon_phi[tag],
-
-            TrigObj_eta[i],
-
-            TrigObj_phi[i]
-
-        );
-
-
-
-        if(dr<0.1)
-        {
-
-            triggerMatched=true;
-
-            break;
-
-        }
-
-
-    }
-
-
-
-
-
-    if(!triggerMatched)
+    if(TrigObj_id[i]!=13)
         continue;
 
 
+    if(TrigObj_pt[i]<24.)
+        continue;
 
-    nTrigMatch++;
 
+    double dr =
+    deltaR(
+        Muon_eta[tag],
+        Muon_phi[tag],
+        TrigObj_eta[i],
+        TrigObj_phi[i]
+    );
+
+
+    if(dr<0.1)
+    {
+        triggerMatched=true;
+        break;
+    }
+
+}
+
+
+if(!triggerMatched)
+    continue;
+
+nTrigMatch++;
 
 
 
