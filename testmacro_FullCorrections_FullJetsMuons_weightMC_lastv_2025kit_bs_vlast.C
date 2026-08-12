@@ -1,4 +1,3 @@
-[nbostan@lxplus983 post2022E-update]$ cat testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_PU.C
 // Nilay Bostan - CERN - August 2026
 // FULL ANALYSIS MACRO — MC ONLY
 // CMS Hmumu Run2025 MCs
@@ -458,7 +457,7 @@ if (chain.GetBranch("Jet_hadronFlavour"))
 
         if(genWeight.GetSetupStatus()==0)
         {
-            weight=getMCWeight(*genWeight)*normFactor;
+            weight=(*genWeight)*normFactor;
 
             if(nTruePU)
             {
@@ -887,7 +886,7 @@ if (chain.GetBranch("Jet_hadronFlavour"))
 
     TFile *out=new TFile(
         "/eos/user/n/nbostan/2025_Samples/"
-        "FullCorrections_2025KIT_ZZto4L_bs_PU.root",
+        "FullCorrections_2025KIT_DY_bs_PU.root",
         "RECREATE");
 
     if(out->IsZombie())
