@@ -1,3 +1,4 @@
+#NilayBostan #CERN #Aug/12/2026
 #pragma cling add_include_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/include")
 #pragma cling add_library_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/lib")
 #pragma cling load("correctionlib")
@@ -24,19 +25,6 @@
 #include <vector>
 
 
-// ============================================================================
-// MUON SF STRUCT
-// ============================================================================
-
-struct MuonSF
-{
-    double ptMin;
-    double ptMax;
-    double etaMin;
-    double etaMax;
-    double sf;
-};
-
 
 // ============================================================================
 // GLOBAL CORRECTIONS
@@ -56,12 +44,8 @@ std::shared_ptr<const correction::CorrectionSet> puCorr;
 std::shared_ptr<const correction::Correction> puWeightCorr;
 
 
-// ============================================================================
-// GLOBAL MUON SF TABLE
-// ============================================================================
-
-std::vector<MuonSF> muonSF;
-
+std::shared_ptr<const correction::CorrectionSet> muonSFCorr;
+std::shared_ptr<const correction::Correction> muonIDSF;
 
 // ============================================================================
 // HISTOGRAMS
@@ -168,87 +152,42 @@ double getCorrectedMuonPt_MC(
 }
 
 
+
 // ============================================================================
-// READ MUON SF TABLE
-//
-// Expected format:
-//
-// ptMin ptMax etaMin etaMax SF
-//
-// Example:
-// 20 30 -2.4 -2.1 0.98
+// GET MUON ID SCALE FACTOR
 // ============================================================================
 
-std::vector<MuonSF> readMuonSF(
-    const std::string& filename)
+double getMuonIDSF(
+    double pt,
+    double eta)
 {
-    std::vector<MuonSF> table;
+    if(!muonIDSF)
+        return 1.0;
 
-    std::ifstream file(filename);
-
-    if(!file.is_open())
+    try
+    {
+        return muonIDSF->evaluate({
+            eta,
+            pt,
+            "nominal"
+        });
+    }
+    catch(const std::exception& e)
     {
         std::cerr
-            << "ERROR: Cannot open muon SF file: "
-            << filename
+            << "WARNING: Muon ID SF evaluation failed"
+            << " for pt = "
+            << pt
+            << ", eta = "
+            << eta
+            << " : "
+            << e.what()
+            << ". Using SF = 1."
             << std::endl;
 
-        return table;
+        return 1.0;
     }
-
-    MuonSF b;
-
-    while(
-        file >>
-        b.ptMin >>
-        b.ptMax >>
-        b.etaMin >>
-        b.etaMax >>
-        b.sf
-    )
-    {
-        table.push_back(b);
-    }
-
-    file.close();
-
-    std::cout
-        << "Loaded "
-        << table.size()
-        << " muon SF bins from "
-        << filename
-        << std::endl;
-
-    return table;
 }
-
-
-// ============================================================================
-// GET MUON SF
-// ============================================================================
-
-double getMuonSF(
-    double pt,
-    double eta,
-    const std::vector<MuonSF>& table)
-{
-    for(const auto& b : table)
-    {
-        if(
-            pt >= b.ptMin &&
-            pt <  b.ptMax &&
-            eta >= b.etaMin &&
-            eta <  b.etaMax
-        )
-        {
-            return b.sf;
-        }
-    }
-
-    // If no bin is found, do not modify the event weight.
-    return 1.0;
-}
-
 
 // ============================================================================
 // PU WEIGHT
@@ -289,7 +228,7 @@ double getPUWeight(double nTruePU)
 // MAIN
 // ============================================================================
 
-void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_PU
+void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_vlast
 (
     std::vector<std::string> inputFiles,
     double xsec_pb,
@@ -324,29 +263,30 @@ void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_PU
         << std::endl;
 
 
-    // ========================================================================
-    // LOAD MUON ID / ISO SCALE FACTORS
-    // ========================================================================
+   // ========================================================================
+// LOAD MUON ID SCALE FACTORS
+// ========================================================================
 
-    std::string muonSFFile =
-        KITDir+"muon_Z_2025.txt";
+std::string muonSFFile =
+    KITDir + "muon_Z_2025.json";
 
-    muonSF =
-        readMuonSF(muonSFFile);
+std::cout
+    << "Loading muon ID SF correction..."
+    << std::endl;
 
-    if(muonSF.empty())
-    {
-        std::cerr
-            << "WARNING: Muon SF table is empty!"
-            << std::endl;
-    }
-    else
-    {
-        std::cout
-            << "Muon ID/ISO SF table loaded"
-            << std::endl;
-    }
+muonSFCorr =
+    correction::CorrectionSet::from_file(
+        muonSFFile
+    );
 
+muonIDSF =
+    muonSFCorr->at(
+        "NUM_MediumPromptID_DEN_TrackerMuons"
+    );
+
+std::cout
+    << "Muon MediumPromptID SF loaded"
+    << std::endl;
 
     // ========================================================================
     // LOAD BTAG CORRECTIONS
@@ -914,31 +854,26 @@ long long nFinal=0;
         //
         // ====================================================================
 
-        double muonSFWeight=1.0;
+   // ====================================================================
+// MUON ID SCALE FACTOR
+// ====================================================================
 
-        if(!muonSF.empty())
-        {
-            double sf1=
-                getMuonSF(
-                    corrPt[0],
-                    Muon_eta[0],
-                    muonSF
-                );
+double sf1 =
+    getMuonIDSF(
+        corrPt[0],
+        Muon_eta[0]
+    );
 
-            double sf2=
-                getMuonSF(
-                    corrPt[1],
-                    Muon_eta[1],
-                    muonSF
-                );
+double sf2 =
+    getMuonIDSF(
+        corrPt[1],
+        Muon_eta[1]
+    );
 
-            muonSFWeight=
-                sf1*sf2;
+double muonSFWeight =
+    sf1 * sf2;
 
-            weight*=
-                muonSFWeight;
-        }
-
+weight *= muonSFWeight;
 // ====================================================================
 // HLT ISO MU24
 // ====================================================================
