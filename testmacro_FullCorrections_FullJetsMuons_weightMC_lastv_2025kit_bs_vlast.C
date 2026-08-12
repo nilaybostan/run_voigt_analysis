@@ -1,27 +1,10 @@
-// Nilay Bostan - CERN - August 2026
-// FULL ANALYSIS MACRO — MC ONLY
-// CMS Hmumu Run2025 MCs
-// KIT correctionlib muon correction
-// BeamSpot constrained muons
-// btagging
-// PU weight (correctionlib JSON)
-// Muon SF
-// JERC MC
-// Jet ID
-// Jet veto map
-// VBF / ggH categorization
-//
-// PU input:
-// puWeights_2025pp_Golden_Summer24_25ns_69200ub.txt
-// correction: Collisions25_goldenJSON
-// variation: nominal
-
 #pragma cling add_include_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/include")
 #pragma cling add_library_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/lib")
 #pragma cling load("correctionlib")
 
 #include "correction.h"
 #include "JetCorrections.h"
+
 #include <TChain.h>
 #include <TFile.h>
 #include <TH1F.h>
@@ -31,16 +14,38 @@
 #include <TLorentzVector.h>
 #include <TRandom.h>
 #include <TError.h>
+
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
 
+
+// ============================================================================
+// MUON SF STRUCT
+// ============================================================================
+
+struct MuonSF
+{
+    double ptMin;
+    double ptMax;
+    double etaMin;
+    double etaMax;
+    double sf;
+};
+
+
+// ============================================================================
+// GLOBAL CORRECTIONS
+// ============================================================================
+
 std::shared_ptr<const correction::CorrectionSet> muonCorr;
 std::shared_ptr<const correction::Correction> muon_m_mc;
 std::shared_ptr<const correction::Correction> muon_a_mc;
+
 JetCorrections jetCorr;
 
 std::shared_ptr<const correction::CorrectionSet> btagCorr;
@@ -50,67 +55,241 @@ std::shared_ptr<const correction::Correction> btagLightSF;
 std::shared_ptr<const correction::CorrectionSet> puCorr;
 std::shared_ptr<const correction::Correction> puWeightCorr;
 
-TH1F *h_mass = new TH1F("h_mass","Dimuon mass",100,0,200);
-TH1F *h_dimuonPt = new TH1F("h_dimuonPt","Dimuon pT",100,0,200);
-TH1F *h_dimuonEta = new TH1F("h_dimuonEta","Dimuon eta",60,-3,3);
-TH1F *h_jetPtCorr = new TH1F("h_jetPtCorr","Corrected jet pT",100,0,500);
-TH1F *h_leadJetPt = new TH1F("h_leadJetPt","Leading jet pT",100,0,500);
-TH1F *h_leadJetEta = new TH1F("h_leadJetEta","Leading jet eta",60,-5,5);
-TH1F *h_dijetMass = new TH1F("h_dijetMass","Dijet mass",100,0,2000);
-TH1F *h_dijetPt = new TH1F("h_dijetPt","Dijet pT",100,0,1000);
-TH1F *h_mass_VBF = new TH1F("h_mass_VBF","VBF dimuon mass",100,0,200);
-TH1F *h_mass_ggH = new TH1F("h_mass_ggH","ggH dimuon mass",100,0,200);
+
+// ============================================================================
+// GLOBAL MUON SF TABLE
+// ============================================================================
+
+std::vector<MuonSF> muonSF;
+
+
+// ============================================================================
+// HISTOGRAMS
+// ============================================================================
+
+TH1F *h_mass =
+    new TH1F("h_mass","Dimuon mass",100,0,200);
+
+TH1F *h_dimuonPt =
+    new TH1F("h_dimuonPt","Dimuon pT",100,0,200);
+
+TH1F *h_dimuonEta =
+    new TH1F("h_dimuonEta","Dimuon eta",60,-3,3);
+
+TH1F *h_jetPtCorr =
+    new TH1F("h_jetPtCorr","Corrected jet pT",100,0,500);
+
+TH1F *h_leadJetPt =
+    new TH1F("h_leadJetPt","Leading jet pT",100,0,500);
+
+TH1F *h_leadJetEta =
+    new TH1F("h_leadJetEta","Leading jet eta",60,-5,5);
+
+TH1F *h_dijetMass =
+    new TH1F("h_dijetMass","Dijet mass",100,0,2000);
+
+TH1F *h_dijetPt =
+    new TH1F("h_dijetPt","Dijet pT",100,0,1000);
+
+TH1F *h_mass_VBF =
+    new TH1F("h_mass_VBF","VBF dimuon mass",100,0,200);
+
+TH1F *h_mass_ggH =
+    new TH1F("h_mass_ggH","ggH dimuon mass",100,0,200);
+
+
+// ============================================================================
+// DELTA PHI
+// ============================================================================
 
 double deltaPhi(double phi1,double phi2)
 {
     double dphi=phi1-phi2;
-    while(dphi>M_PI) dphi-=2*M_PI;
-    while(dphi<=-M_PI) dphi+=2*M_PI;
+
+    while(dphi>M_PI)
+        dphi-=2*M_PI;
+
+    while(dphi<=-M_PI)
+        dphi+=2*M_PI;
+
     return dphi;
 }
 
-double deltaR(double eta1,double phi1,double eta2,double phi2)
+
+// ============================================================================
+// DELTA R
+// ============================================================================
+
+double deltaR(
+    double eta1,
+    double phi1,
+    double eta2,
+    double phi2)
 {
     double deta=eta1-eta2;
-    double dphi=deltaPhi(phi1,phi2);
-    return sqrt(deta*deta+dphi*dphi);
+
+    double dphi=
+        deltaPhi(phi1,phi2);
+
+    return sqrt(
+        deta*deta+
+        dphi*dphi
+    );
 }
 
-double getCorrectedMuonPt_MC(double pt,double eta,double phi)
-{
-    if(!muon_m_mc || !muon_a_mc) return pt;
 
-    double m=muon_m_mc->evaluate({eta,phi,"nom"});
-    double a=muon_a_mc->evaluate({eta,phi,"nom"});
+// ============================================================================
+// KIT MUON MOMENTUM CORRECTION
+// ============================================================================
+
+double getCorrectedMuonPt_MC(
+    double pt,
+    double eta,
+    double phi)
+{
+    if(!muon_m_mc || !muon_a_mc)
+        return pt;
+
+    double m=
+        muon_m_mc->evaluate({
+            eta,
+            phi,
+            "nom"
+        });
+
+    double a=
+        muon_a_mc->evaluate({
+            eta,
+            phi,
+            "nom"
+        });
+
     return pt*m+a;
 }
 
-double getMCWeight(double genWeight)
+
+// ============================================================================
+// READ MUON SF TABLE
+//
+// Expected format:
+//
+// ptMin ptMax etaMin etaMax SF
+//
+// Example:
+// 20 30 -2.4 -2.1 0.98
+// ============================================================================
+
+std::vector<MuonSF> readMuonSF(
+    const std::string& filename)
 {
-    if(genWeight>=0.0) return 1.0;
-    else return -1.0;
+    std::vector<MuonSF> table;
+
+    std::ifstream file(filename);
+
+    if(!file.is_open())
+    {
+        std::cerr
+            << "ERROR: Cannot open muon SF file: "
+            << filename
+            << std::endl;
+
+        return table;
+    }
+
+    MuonSF b;
+
+    while(
+        file >>
+        b.ptMin >>
+        b.ptMax >>
+        b.etaMin >>
+        b.etaMax >>
+        b.sf
+    )
+    {
+        table.push_back(b);
+    }
+
+    file.close();
+
+    std::cout
+        << "Loaded "
+        << table.size()
+        << " muon SF bins from "
+        << filename
+        << std::endl;
+
+    return table;
 }
 
+
+// ============================================================================
+// GET MUON SF
+// ============================================================================
+
+double getMuonSF(
+    double pt,
+    double eta,
+    const std::vector<MuonSF>& table)
+{
+    for(const auto& b : table)
+    {
+        if(
+            pt >= b.ptMin &&
+            pt <  b.ptMax &&
+            eta >= b.etaMin &&
+            eta <  b.etaMax
+        )
+        {
+            return b.sf;
+        }
+    }
+
+    // If no bin is found, do not modify the event weight.
+    return 1.0;
+}
+
+
+// ============================================================================
+// PU WEIGHT
+// ============================================================================
+//
 // PU JSON is correctionlib, not a whitespace table.
+// ============================================================================
+
 double getPUWeight(double nTruePU)
 {
-    if(!puWeightCorr) return 1.0;
+    if(!puWeightCorr)
+        return 1.0;
 
     try
     {
-        return puWeightCorr->evaluate({nTruePU,"nominal"});
+        return puWeightCorr->evaluate({
+            nTruePU,
+            "nominal"
+        });
     }
     catch(const std::exception& e)
     {
         std::cerr
-            <<"WARNING: PU correction evaluation failed for nTruePU = "
-            <<nTruePU<<" : "<<e.what()
-            <<". Using PU weight = 1."<<std::endl;
+            << "WARNING: PU correction evaluation failed "
+            << "for nTruePU = "
+            << nTruePU
+            << " : "
+            << e.what()
+            << ". Using PU weight = 1."
+            << std::endl;
+
         return 1.0;
     }
 }
 
-void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_vlast
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_PU
 (
     std::vector<std::string> inputFiles,
     double xsec_pb,
@@ -120,50 +299,140 @@ void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_vlast
 {
     gErrorIgnoreLevel=kError;
 
-    std::cout<<"Loading KIT muon corrections..."<<std::endl;
-
-    muonCorr=correction::CorrectionSet::from_file(
-        KITDir+"schemaV2_2025.json");
-
-    muon_m_mc=muonCorr->at("m_mc");
-    muon_a_mc=muonCorr->at("a_mc");
-
-    std::cout<<"KIT MC muon correction loaded"<<std::endl;
-
-    btagCorr=correction::CorrectionSet::from_file(
-        KITDir+"btagging.json");
-
-    btagSF=btagCorr->at("UParTAK4_comb");
-    btagLightSF=btagCorr->at("UParTAK4_light");
-
-    std::cout<<"Btag correction loaded"<<std::endl;
-
-    jetCorr=JetCorrections(
-        KITDir+"jet_jerc.txt",
-        KITDir+"jetid.txt",
-        KITDir+"jetvetomaps.txt");
-
-    std::cout<<"Jet corrections loaded"<<std::endl;
 
     // ========================================================================
-    // LOAD PU WEIGHTS — CORRECTIONLIB JSON
+    // LOAD KIT MUON MOMENTUM CORRECTIONS
     // ========================================================================
-
-    std::cout<<"Loading PU correction..."<<std::endl;
-
-    puCorr=correction::CorrectionSet::from_file(
-        KITDir+"puWeights_2025pp_Golden_Summer24_25ns_69200ub.txt");
-
-    puWeightCorr=puCorr->at("Collisions25_goldenJSON");
 
     std::cout
-        <<"PU correction loaded: Collisions25_goldenJSON"
-        <<std::endl;
+        << "Loading KIT muon corrections..."
+        << std::endl;
+
+    muonCorr=
+        correction::CorrectionSet::from_file(
+            KITDir+"schemaV2_2025.json"
+        );
+
+    muon_m_mc=
+        muonCorr->at("m_mc");
+
+    muon_a_mc=
+        muonCorr->at("a_mc");
+
+    std::cout
+        << "KIT MC muon correction loaded"
+        << std::endl;
+
+
+    // ========================================================================
+    // LOAD MUON ID / ISO SCALE FACTORS
+    // ========================================================================
+
+    std::string muonSFFile =
+        KITDir+"muon_Z_2025.txt";
+
+    muonSF =
+        readMuonSF(muonSFFile);
+
+    if(muonSF.empty())
+    {
+        std::cerr
+            << "WARNING: Muon SF table is empty!"
+            << std::endl;
+    }
+    else
+    {
+        std::cout
+            << "Muon ID/ISO SF table loaded"
+            << std::endl;
+    }
+
+
+    // ========================================================================
+    // LOAD BTAG CORRECTIONS
+    // ========================================================================
+
+    btagCorr=
+        correction::CorrectionSet::from_file(
+            KITDir+"btagging.json"
+        );
+
+    btagSF=
+        btagCorr->at("UParTAK4_comb");
+
+    btagLightSF=
+        btagCorr->at("UParTAK4_light");
+
+    std::cout
+        << "Btag correction loaded"
+        << std::endl;
+
+
+    // ========================================================================
+    // LOAD JET CORRECTIONS
+    // ========================================================================
+
+    jetCorr=
+        JetCorrections(
+            KITDir+"jet_jerc.txt",
+            KITDir+"jetid.txt",
+            KITDir+"jetvetomaps.txt"
+        );
+
+    std::cout
+        << "Jet corrections loaded"
+        << std::endl;
+
+
+    // ========================================================================
+    // LOAD PU WEIGHTS
+    // ========================================================================
+
+    std::cout
+        << "Loading PU correction..."
+        << std::endl;
+
+    puCorr=
+        correction::CorrectionSet::from_file(
+            KITDir+
+            "puWeights_2025pp_Golden_Summer24_25ns_69200ub.txt"
+        );
+
+    puWeightCorr=
+        puCorr->at(
+            "Collisions25_goldenJSON"
+        );
+
+    std::cout
+        << "PU correction loaded: "
+        << "Collisions25_goldenJSON"
+        << std::endl;
+
+
+    // ========================================================================
+    // SUMW2
+    // ========================================================================
 
     for(auto h:{
-        h_mass,h_dimuonPt,h_dimuonEta,h_jetPtCorr,h_leadJetPt,
-        h_leadJetEta,h_dijetMass,h_dijetPt,h_mass_VBF,h_mass_ggH})
+        h_mass,
+        h_dimuonPt,
+        h_dimuonEta,
+        h_jetPtCorr,
+        h_leadJetPt,
+        h_leadJetEta,
+        h_dijetMass,
+        h_dijetPt,
+        h_mass_VBF,
+        h_mass_ggH
+    })
+    {
         h->Sumw2();
+    }
+
+
+    // ========================================================================
+    // CHAIN
+    // ========================================================================
 
     TChain chain("Events");
 
@@ -171,300 +440,368 @@ void testmacro_FullCorrections_FullJetsMuons_weightMC_lastv_2025kit_bs_vlast
         chain.Add(file.c_str());
 
     std::cout
-        <<"Total entries = "<<chain.GetEntries()
-        <<std::endl;
+        << "Total entries = "
+        << chain.GetEntries()
+        << std::endl;
 
-    double lumi_pb=lumi_fb*1000.0;
+
+    // ========================================================================
+    // MC NORMALIZATION
+    // ========================================================================
+
+    double lumi_pb=
+        lumi_fb*1000.0;
+
     double sumGenWeight=0.0;
 
     TTreeReader sumReader(&chain);
-    TTreeReaderValue<float> sumGenWeightReader(sumReader,"genWeight");
+
+    TTreeReaderValue<float>
+        sumGenWeightReader(
+            sumReader,
+            "genWeight"
+        );
 
     while(sumReader.Next())
-        sumGenWeight+=*sumGenWeightReader;
+        sumGenWeight+=
+            *sumGenWeightReader;
 
-    std::cout<<"Sum genWeight = "<<sumGenWeight<<std::endl;
+    std::cout
+        << "Sum genWeight = "
+        << sumGenWeight
+        << std::endl;
+
 
     if(fabs(sumGenWeight)<1e-6)
     {
-        std::cerr<<"ERROR: Invalid sumGenWeight"<<std::endl;
+        std::cerr
+            << "ERROR: Invalid sumGenWeight"
+            << std::endl;
+
         return;
     }
 
-    double normFactor=(xsec_pb*lumi_pb)/sumGenWeight;
+
+    double normFactor=
+        (xsec_pb*lumi_pb)
+        /
+        sumGenWeight;
+
 
     std::cout
-        <<"MC normalization factor = "<<normFactor
-        <<std::endl;
+        << "MC normalization factor = "
+        << normFactor
+        << std::endl;
 
-   TTreeReader reader(&chain);
 
-// ============================================================================
-// EVENT INFORMATION
-// ============================================================================
+    // ========================================================================
+    // TREE READER
+    // ========================================================================
 
-TTreeReaderValue<UInt_t> run(
-    reader,
-    "run"
-);
+    TTreeReader reader(&chain);
 
-TTreeReaderValue<UInt_t> luminosityBlock(
-    reader,
-    "luminosityBlock"
-);
 
-// ============================================================================
-// MC WEIGHT
-// ============================================================================
+    // ========================================================================
+    // EVENT INFORMATION
+    // ========================================================================
 
-TTreeReaderValue<Float_t> genWeight(
-    reader,
-    "genWeight"
-);
+    TTreeReaderValue<UInt_t> run(
+        reader,
+        "run"
+    );
 
-// ============================================================================
-// PILEUP
-// ============================================================================
+    TTreeReaderValue<UInt_t> luminosityBlock(
+        reader,
+        "luminosityBlock"
+    );
 
-TTreeReaderValue<Float_t>* nTruePU = nullptr;
 
-if (chain.GetBranch("Pileup_nTrueInt"))
-{
-    nTruePU =
-        new TTreeReaderValue<Float_t>(
+    // ========================================================================
+    // MC WEIGHT
+    // ========================================================================
+
+    TTreeReaderValue<Float_t> genWeight(
+        reader,
+        "genWeight"
+    );
+
+
+    // ========================================================================
+    // PILEUP
+    // ========================================================================
+
+    TTreeReaderValue<Float_t>* nTruePU=nullptr;
+
+    if(chain.GetBranch("Pileup_nTrueInt"))
+    {
+        nTruePU=
+            new TTreeReaderValue<Float_t>(
+                reader,
+                "Pileup_nTrueInt"
+            );
+
+        std::cout
+            << "Pileup_nTrueInt branch found"
+            << std::endl;
+    }
+    else
+    {
+        std::cerr
+            << "WARNING: Pileup_nTrueInt branch not found!"
+            << std::endl;
+    }
+
+
+    // ========================================================================
+    // TRIGGER
+    // ========================================================================
+
+    TTreeReaderValue<Bool_t> HLT_IsoMu24(
+        reader,
+        "HLT_IsoMu24"
+    );
+
+
+    // ========================================================================
+    // MUONS
+    // ========================================================================
+
+    TTreeReaderValue<Int_t> nMuon(
+        reader,
+        "nMuon"
+    );
+
+    TTreeReaderArray<Float_t> Muon_pt(
+        reader,
+        "Muon_pt"
+    );
+
+    TTreeReaderArray<Float_t> Muon_eta(
+        reader,
+        "Muon_eta"
+    );
+
+    TTreeReaderArray<Float_t> Muon_phi(
+        reader,
+        "Muon_phi"
+    );
+
+    TTreeReaderArray<Float_t>
+        Muon_pfRelIso04_all(
             reader,
-            "Pileup_nTrueInt"
+            "Muon_pfRelIso04_all"
         );
+
+    TTreeReaderArray<Int_t> Muon_charge(
+        reader,
+        "Muon_charge"
+    );
+
+    TTreeReaderArray<Bool_t> Muon_mediumId(
+        reader,
+        "Muon_mediumId"
+    );
+
+
+    // ========================================================================
+    // BEAMSPOT CONSTRAINED MUONS
+    // ========================================================================
+
+    bool hasBS=false;
+
+    if(chain.GetBranch(
+        "Muon_bsConstrainedPt"))
+    {
+        hasBS=true;
+    }
+
+    TTreeReaderArray<Float_t>*
+        Muon_bsConstrainedPt=nullptr;
+
+    TTreeReaderArray<Float_t>*
+        Muon_bsConstrainedChi2=nullptr;
+
+    if(hasBS)
+    {
+        Muon_bsConstrainedPt=
+            new TTreeReaderArray<Float_t>(
+                reader,
+                "Muon_bsConstrainedPt"
+            );
+
+        Muon_bsConstrainedChi2=
+            new TTreeReaderArray<Float_t>(
+                reader,
+                "Muon_bsConstrainedChi2"
+            );
+    }
 
     std::cout
-        << "Pileup_nTrueInt branch found"
+        << "BeamSpot branch = "
+        << hasBS
         << std::endl;
-}
-else
-{
-    std::cerr
-        << "WARNING: Pileup_nTrueInt branch not found!"
-        << std::endl;
-}
 
-// ============================================================================
-// TRIGGER
-// ============================================================================
 
-TTreeReaderValue<Bool_t> HLT_IsoMu24(
-    reader,
-    "HLT_IsoMu24"
-);
+    // ========================================================================
+    // TRIGGER OBJECTS
+    // ========================================================================
 
-// ============================================================================
-// MUONS
-// ============================================================================
+    TTreeReaderValue<Int_t> nTrigObj(
+        reader,
+        "nTrigObj"
+    );
 
-TTreeReaderValue<Int_t> nMuon(
-    reader,
-    "nMuon"
-);
+    TTreeReaderArray<Float_t> TrigObj_pt(
+        reader,
+        "TrigObj_pt"
+    );
 
-TTreeReaderArray<Float_t> Muon_pt(
-    reader,
-    "Muon_pt"
-);
+    TTreeReaderArray<Float_t> TrigObj_eta(
+        reader,
+        "TrigObj_eta"
+    );
 
-TTreeReaderArray<Float_t> Muon_eta(
-    reader,
-    "Muon_eta"
-);
+    TTreeReaderArray<Float_t> TrigObj_phi(
+        reader,
+        "TrigObj_phi"
+    );
 
-TTreeReaderArray<Float_t> Muon_phi(
-    reader,
-    "Muon_phi"
-);
+    TTreeReaderArray<UShort_t> TrigObj_id(
+        reader,
+        "TrigObj_id"
+    );
 
-TTreeReaderArray<Float_t> Muon_pfRelIso04_all(
-    reader,
-    "Muon_pfRelIso04_all"
-);
+    TTreeReaderArray<ULong64_t>*
+        TrigObj_filterBits=nullptr;
 
-TTreeReaderArray<Int_t> Muon_charge(
-    reader,
-    "Muon_charge"
-);
+    if(chain.GetBranch(
+        "TrigObj_filterBits"))
+    {
+        TrigObj_filterBits=
+            new TTreeReaderArray<ULong64_t>(
+                reader,
+                "TrigObj_filterBits"
+            );
+    }
 
-TTreeReaderArray<Bool_t> Muon_mediumId(
-    reader,
-    "Muon_mediumId"
-);
 
-// ============================================================================
-// BEAMSPOT CONSTRAINED MUONS
-// ============================================================================
+    // ========================================================================
+    // JETS
+    // ========================================================================
 
-bool hasBS = false;
+    TTreeReaderValue<Int_t> nJet(
+        reader,
+        "nJet"
+    );
 
-if (chain.GetBranch("Muon_bsConstrainedPt"))
-{
-    hasBS = true;
-}
+    TTreeReaderArray<Float_t> Jet_pt(
+        reader,
+        "Jet_pt"
+    );
 
-TTreeReaderArray<Float_t>* Muon_bsConstrainedPt = nullptr;
-TTreeReaderArray<Float_t>* Muon_bsConstrainedChi2 = nullptr;
+    TTreeReaderArray<Float_t> Jet_eta(
+        reader,
+        "Jet_eta"
+    );
 
-if (hasBS)
-{
-    Muon_bsConstrainedPt =
-        new TTreeReaderArray<Float_t>(
-            reader,
-            "Muon_bsConstrainedPt"
-        );
+    TTreeReaderArray<Float_t> Jet_phi(
+        reader,
+        "Jet_phi"
+    );
 
-    Muon_bsConstrainedChi2 =
-        new TTreeReaderArray<Float_t>(
-            reader,
-            "Muon_bsConstrainedChi2"
-        );
-}
+    TTreeReaderArray<Float_t> Jet_mass(
+        reader,
+        "Jet_mass"
+    );
 
-std::cout
-    << "BeamSpot branch = "
-    << hasBS
-    << std::endl;
+    TTreeReaderArray<Float_t> Jet_rawFactor(
+        reader,
+        "Jet_rawFactor"
+    );
 
-// ============================================================================
-// TRIGGER OBJECTS
-// ============================================================================
 
-// ============================================================================
-// TRIGGER OBJECTS
-// ============================================================================
+    // ========================================================================
+    // B TAG BRANCHES
+    // ========================================================================
 
-TTreeReaderValue<Int_t> nTrigObj(
-    reader,
-    "nTrigObj"
-);
+    TTreeReaderArray<Float_t>*
+        Jet_btagDeepFlavB=nullptr;
 
-TTreeReaderArray<Float_t> TrigObj_pt(
-    reader,
-    "TrigObj_pt"
-);
+    TTreeReaderArray<UChar_t>*
+        Jet_hadronFlavour=nullptr;
 
-TTreeReaderArray<Float_t> TrigObj_eta(
-    reader,
-    "TrigObj_eta"
-);
+    if(chain.GetBranch(
+        "Jet_btagDeepFlavB"))
+    {
+        Jet_btagDeepFlavB=
+            new TTreeReaderArray<Float_t>(
+                reader,
+                "Jet_btagDeepFlavB"
+            );
+    }
 
-TTreeReaderArray<Float_t> TrigObj_phi(
-    reader,
-    "TrigObj_phi"
-);
+    if(chain.GetBranch(
+        "Jet_hadronFlavour"))
+    {
+        Jet_hadronFlavour=
+            new TTreeReaderArray<UChar_t>(
+                reader,
+                "Jet_hadronFlavour"
+            );
+    }
 
-// NanoAOD branch type = unsigned short
-TTreeReaderArray<UShort_t> TrigObj_id(
-    reader,
-    "TrigObj_id"
-);
 
-// NanoAOD branch type = unsigned long long
-TTreeReaderArray<ULong64_t>* TrigObj_filterBits = nullptr;
+    // ========================================================================
+    // CUT COUNTERS
+    // ========================================================================
 
-if (chain.GetBranch("TrigObj_filterBits"))
-{
-    TrigObj_filterBits =
-        new TTreeReaderArray<ULong64_t>(
-            reader,
-            "TrigObj_filterBits"
-        );
-}
-// ============================================================================
-// JETS
-// ============================================================================
+long long nTotal=0;
+long long nTwoMuon=0;
+long long nMuonSel=0;
+long long nHLT=0;
+long long nTriggerMatch=0;
+long long nFinal=0;
 
-TTreeReaderValue<Int_t> nJet(
-    reader,
-    "nJet"
-);
 
-TTreeReaderArray<Float_t> Jet_pt(
-    reader,
-    "Jet_pt"
-);
-
-TTreeReaderArray<Float_t> Jet_eta(
-    reader,
-    "Jet_eta"
-);
-
-TTreeReaderArray<Float_t> Jet_phi(
-    reader,
-    "Jet_phi"
-);
-
-TTreeReaderArray<Float_t> Jet_mass(
-    reader,
-    "Jet_mass"
-);
-
-TTreeReaderArray<Float_t> Jet_rawFactor(
-    reader,
-    "Jet_rawFactor"
-);
-
-// ============================================================================
-// B TAG BRANCHES
-// ============================================================================
-
-// ============================================================================
-// B TAG BRANCHES
-// ============================================================================
-
-TTreeReaderArray<Float_t>* Jet_btagDeepFlavB = nullptr;
-
-// NanoAOD branch type = unsigned char
-TTreeReaderArray<UChar_t>* Jet_hadronFlavour = nullptr;
-
-if (chain.GetBranch("Jet_btagDeepFlavB"))
-{
-    Jet_btagDeepFlavB =
-        new TTreeReaderArray<Float_t>(
-            reader,
-            "Jet_btagDeepFlavB"
-        );
-}
-
-if (chain.GetBranch("Jet_hadronFlavour"))
-{
-    Jet_hadronFlavour =
-        new TTreeReaderArray<UChar_t>(
-            reader,
-            "Jet_hadronFlavour"
-        );
-}
-
-    long long nTotal=0;
-    long long nTwoMuon=0;
-    long long nMuonSel=0;
-    long long nTrigger=0;
-    long long nFinal=0;
+    // ========================================================================
+    // EVENT LOOP
+    // ========================================================================
 
     while(reader.Next())
     {
         nTotal++;
 
+
         // ====================================================================
         // MC EVENT WEIGHT
+        //
+        // IMPORTANT:
+        // Use the FULL generator weight.
+        // Do NOT reduce genWeight to sign(+/-1).
         // ====================================================================
 
         double weight=1.0;
 
         if(genWeight.GetSetupStatus()==0)
         {
-            weight=(*genWeight)*normFactor;
+            weight=
+                (*genWeight)
+                *
+                normFactor;
+
+            // ---------------------------------------------------------------
+            // PU WEIGHT
+            // ---------------------------------------------------------------
 
             if(nTruePU)
             {
-                double puWeight=getPUWeight(**nTruePU);
+                double puWeight=
+                    getPUWeight(**nTruePU);
+
                 weight*=puWeight;
             }
         }
+
 
         // ====================================================================
         // EXACTLY TWO MUONS
@@ -474,6 +811,7 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             continue;
 
         nTwoMuon++;
+
 
         // ====================================================================
         // BEAMSPOT MUON PT
@@ -488,27 +826,33 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                 (*Muon_bsConstrainedChi2)[i]<30.
             )
             {
-                muPt[i]=(*Muon_bsConstrainedPt)[i];
+                muPt[i]=
+                    (*Muon_bsConstrainedPt)[i];
             }
             else
             {
-                muPt[i]=Muon_pt[i];
+                muPt[i]=
+                    Muon_pt[i];
             }
         }
 
+
         // ====================================================================
-        // KIT MUON CORRECTION MC
+        // KIT MUON MOMENTUM CORRECTION
         // ====================================================================
 
         double corrPt[2];
+
         bool passMuon=true;
 
         for(int i=0;i<2;i++)
         {
-            corrPt[i]=getCorrectedMuonPt_MC(
-                muPt[i],
-                Muon_eta[i],
-                Muon_phi[i]);
+            corrPt[i]=
+                getCorrectedMuonPt_MC(
+                    muPt[i],
+                    Muon_eta[i],
+                    Muon_phi[i]
+                );
 
             if(fabs(Muon_eta[i])>2.4)
                 passMuon=false;
@@ -520,8 +864,19 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                 passMuon=false;
         }
 
-        double leadPt=std::max(corrPt[0],corrPt[1]);
-        double subleadPt=std::min(corrPt[0],corrPt[1]);
+
+        double leadPt=
+            std::max(
+                corrPt[0],
+                corrPt[1]
+            );
+
+        double subleadPt=
+            std::min(
+                corrPt[0],
+                corrPt[1]
+            );
+
 
         if(leadPt<26.)
             passMuon=false;
@@ -529,17 +884,69 @@ if (chain.GetBranch("Jet_hadronFlavour"))
         if(subleadPt<20.)
             passMuon=false;
 
+
         if(!passMuon)
             continue;
 
         nMuonSel++;
 
+
         // ====================================================================
         // OPPOSITE SIGN
         // ====================================================================
 
-        if(Muon_charge[0]*Muon_charge[1]>=0)
+        if(
+            Muon_charge[0]*
+            Muon_charge[1]>=0
+        )
             continue;
+
+
+        // ====================================================================
+        // MUON ID / ISO SCALE FACTOR
+        // ====================================================================
+        //
+        // Use the corrected MC muon pT.
+        //
+        // Total muon SF:
+        //
+        //   SF(mu1) * SF(mu2)
+        //
+        // ====================================================================
+
+        double muonSFWeight=1.0;
+
+        if(!muonSF.empty())
+        {
+            double sf1=
+                getMuonSF(
+                    corrPt[0],
+                    Muon_eta[0],
+                    muonSF
+                );
+
+            double sf2=
+                getMuonSF(
+                    corrPt[1],
+                    Muon_eta[1],
+                    muonSF
+                );
+
+            muonSFWeight=
+                sf1*sf2;
+
+            weight*=
+                muonSFWeight;
+        }
+
+// ====================================================================
+// HLT ISO MU24
+// ====================================================================
+
+if(!(*HLT_IsoMu24))
+    continue;
+
+nHLT++;
 
         // ====================================================================
         // TRIGGER MATCHING
@@ -555,32 +962,41 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(TrigObj_pt[i]<24.)
                 continue;
 
-            // Do NOT apply filterBits for now
-            // Run2025 NanoAOD filter bit needs validation
+            // Do NOT apply filterBits for now.
+            // Run2025 NanoAOD filter bit needs validation.
 
-            double dr0=deltaR(
-                Muon_eta[0],
-                Muon_phi[0],
-                TrigObj_eta[i],
-                TrigObj_phi[i]);
+            double dr0=
+                deltaR(
+                    Muon_eta[0],
+                    Muon_phi[0],
+                    TrigObj_eta[i],
+                    TrigObj_phi[i]
+                );
 
-            double dr1=deltaR(
-                Muon_eta[1],
-                Muon_phi[1],
-                TrigObj_eta[i],
-                TrigObj_phi[i]);
+            double dr1=
+                deltaR(
+                    Muon_eta[1],
+                    Muon_phi[1],
+                    TrigObj_eta[i],
+                    TrigObj_phi[i]
+                );
 
-            if(dr0<0.1 || dr1<0.1)
+            if(
+                dr0<0.1 ||
+                dr1<0.1
+            )
             {
                 triggerMatched=true;
                 break;
             }
         }
 
+
         if(!triggerMatched)
             continue;
 
-        nTrigger++;
+        nTriggerMatch++;
+
 
         // ====================================================================
         // BUILD MUON FOUR VECTORS
@@ -593,30 +1009,48 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             corrPt[0],
             Muon_eta[0],
             Muon_phi[0],
-            0.105);
+            0.105
+        );
 
         mu2.SetPtEtaPhiM(
             corrPt[1],
             Muon_eta[1],
             Muon_phi[1],
-            0.105);
+            0.105
+        );
 
-        TLorentzVector dimuon=mu1+mu2;
+        TLorentzVector dimuon=
+            mu1+mu2;
+
 
         // ====================================================================
         // DIMUON HISTOGRAMS
         // ====================================================================
 
-        h_mass->Fill(dimuon.M(),weight);
-        h_dimuonPt->Fill(dimuon.Pt(),weight);
-        h_dimuonEta->Fill(dimuon.Eta(),weight);
+        h_mass->Fill(
+            dimuon.M(),
+            weight
+        );
+
+        h_dimuonPt->Fill(
+            dimuon.Pt(),
+            weight
+        );
+
+        h_dimuonEta->Fill(
+            dimuon.Eta(),
+            weight
+        );
+
 
         // ====================================================================
         // JETS
         // ====================================================================
 
         std::vector<TLorentzVector> jets;
+
         int nMediumB=0;
+
 
         for(int j=0;j<*nJet;j++)
         {
@@ -630,7 +1064,9 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                     Jet_eta[j],
                     Jet_phi[j],
                     Jet_rawFactor[j],
-                    true);
+                    true
+                );
+
 
             if(correctedPt<20.)
                 continue;
@@ -638,13 +1074,16 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(fabs(Jet_eta[j])>4.7)
                 continue;
 
+
             TLorentzVector jet;
 
             jet.SetPtEtaPhiM(
                 correctedPt,
                 Jet_eta[j],
                 Jet_phi[j],
-                Jet_mass[j]);
+                Jet_mass[j]
+            );
+
 
             // =================================================================
             // JET ID
@@ -653,8 +1092,10 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(!jetCorr.passJetID(jet))
                 continue;
 
-            // MC: NO jet veto map
-            // Jet veto map only DATA
+
+            // MC: NO jet veto map.
+            // Jet veto map only DATA.
+
 
             // =================================================================
             // MUON-JET OVERLAP REMOVAL
@@ -666,11 +1107,12 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(jet.DeltaR(mu2)<0.4)
                 continue;
 
+
             jets.push_back(jet);
+
 
             // =================================================================
             // B TAGGING
-            // DeepFlavour Medium WP 2025
             // =================================================================
 
             double discr=0.0;
@@ -680,20 +1122,28 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                 Jet_btagDeepFlavB->GetSize()>j
             )
             {
-                discr=(*Jet_btagDeepFlavB)[j];
+                discr=
+                    (*Jet_btagDeepFlavB)[j];
             }
+
 
             if(discr>0.1272)
                 nMediumB++;
 
-            h_jetPtCorr->Fill(correctedPt,weight);
+
+            h_jetPtCorr->Fill(
+                correctedPt,
+                weight
+            );
         }
+
 
         // ====================================================================
         // B TAG SCALE FACTOR
         // ====================================================================
 
         double btagWeight=1.0;
+
 
         for(int j=0;j<*nJet;j++)
         {
@@ -703,7 +1153,9 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                     Jet_eta[j],
                     Jet_phi[j],
                     Jet_rawFactor[j],
-                    true);
+                    true
+                );
+
 
             if(correctedPt<20.)
                 continue;
@@ -711,16 +1163,20 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(fabs(Jet_eta[j])>4.7)
                 continue;
 
+
             TLorentzVector jet;
 
             jet.SetPtEtaPhiM(
                 correctedPt,
                 Jet_eta[j],
                 Jet_phi[j],
-                Jet_mass[j]);
+                Jet_mass[j]
+            );
+
 
             if(!jetCorr.passJetID(jet))
                 continue;
+
 
             if(jet.DeltaR(mu1)<0.4)
                 continue;
@@ -728,7 +1184,9 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             if(jet.DeltaR(mu2)<0.4)
                 continue;
 
+
             int hadronFlavour=0;
+
 
             if(
                 Jet_hadronFlavour &&
@@ -737,42 +1195,59 @@ if (chain.GetBranch("Jet_hadronFlavour"))
             {
                 hadronFlavour=
                     static_cast<int>(
-                        (*Jet_hadronFlavour)[j]);
+                        (*Jet_hadronFlavour)[j]
+                    );
             }
 
-            double absEta=fabs(Jet_eta[j]);
-            double pt=correctedPt;
+
+            double absEta=
+                fabs(Jet_eta[j]);
+
+            double pt=
+                correctedPt;
+
             double sf=1.0;
 
-            if(hadronFlavour==5 || hadronFlavour==4)
+
+            if(
+                hadronFlavour==5 ||
+                hadronFlavour==4
+            )
             {
                 if(absEta<2.5)
                 {
-                    sf=btagSF->evaluate({
-                        "central",
-                        "M",
-                        hadronFlavour,
-                        absEta,
-                        pt});
+                    sf=
+                        btagSF->evaluate({
+                            "central",
+                            "M",
+                            hadronFlavour,
+                            absEta,
+                            pt
+                        });
                 }
             }
             else if(hadronFlavour==0)
             {
                 if(absEta<2.5)
                 {
-                    sf=btagLightSF->evaluate({
-                        "central",
-                        "M",
-                        hadronFlavour,
-                        absEta,
-                        pt});
+                    sf=
+                        btagLightSF->evaluate({
+                            "central",
+                            "M",
+                            hadronFlavour,
+                            absEta,
+                            pt
+                        });
                 }
             }
+
 
             btagWeight*=sf;
         }
 
+
         weight*=btagWeight;
+
 
         // ====================================================================
         // SORT JETS BY PT
@@ -785,7 +1260,9 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                const TLorentzVector& b)
             {
                 return a.Pt()>b.Pt();
-            });
+            }
+        );
+
 
         // ====================================================================
         // LEADING JET
@@ -793,9 +1270,17 @@ if (chain.GetBranch("Jet_hadronFlavour"))
 
         if(!jets.empty())
         {
-            h_leadJetPt->Fill(jets[0].Pt(),weight);
-            h_leadJetEta->Fill(jets[0].Eta(),weight);
+            h_leadJetPt->Fill(
+                jets[0].Pt(),
+                weight
+            );
+
+            h_leadJetEta->Fill(
+                jets[0].Eta(),
+                weight
+            );
         }
+
 
         // ====================================================================
         // VBF / ggH CATEGORY
@@ -804,21 +1289,39 @@ if (chain.GetBranch("Jet_hadronFlavour"))
         bool isVBF=false;
         bool isGGH=false;
 
+
         if(jets.size()>=2)
         {
-            TLorentzVector j1=jets[0];
-            TLorentzVector j2=jets[1];
+            TLorentzVector j1=
+                jets[0];
 
-            double mjj=(j1+j2).M();
+            TLorentzVector j2=
+                jets[1];
 
-            double deta=fabs(
-                j1.Eta()-j2.Eta());
 
-            h_dijetMass->Fill(mjj,weight);
-            h_dijetPt->Fill((j1+j2).Pt(),weight);
+            double mjj=
+                (j1+j2).M();
+
+            double deta=
+                fabs(
+                    j1.Eta()-
+                    j2.Eta()
+                );
+
+
+            h_dijetMass->Fill(
+                mjj,
+                weight
+            );
+
+            h_dijetPt->Fill(
+                (j1+j2).Pt(),
+                weight
+            );
+
 
             // =================================================================
-            // VBF SELECTION
+            // VBF
             // =================================================================
 
             if(
@@ -846,6 +1349,7 @@ if (chain.GetBranch("Jet_hadronFlavour"))
                 isGGH=true;
         }
 
+
         // ====================================================================
         // CATEGORY MASS
         // ====================================================================
@@ -856,8 +1360,10 @@ if (chain.GetBranch("Jet_hadronFlavour"))
 
             h_mass_VBF->Fill(
                 dimuon.M(),
-                weight);
+                weight
+            );
         }
+
 
         if(isGGH)
         {
@@ -865,36 +1371,34 @@ if (chain.GetBranch("Jet_hadronFlavour"))
 
             h_mass_ggH->Fill(
                 dimuon.M(),
-                weight);
+                weight
+            );
         }
 
     } // while(reader.Next())
 
-    /*
-    cout<<"=================================="<<endl;
-    cout<<"Total events      = "<<nTotal<<endl;
-    cout<<"Two muons         = "<<nTwoMuon<<endl;
-    cout<<"Muon selection    = "<<nMuonSel<<endl;
-    cout<<"Trigger matched   = "<<nTrigger<<endl;
-    cout<<"Final categories  = "<<nFinal<<endl;
-    cout<<"=================================="<<endl;
-    */
 
     // ========================================================================
     // OUTPUT ROOT FILE
     // ========================================================================
 
-    TFile *out=new TFile(
-        "/eos/user/n/nbostan/2025_Samples/"
-        "FullCorrections_2025KIT_DY_bs_PU.root",
-        "RECREATE");
+    TFile *out=
+        new TFile(
+            "/eos/user/n/nbostan/2025_Samples/"
+            "FullCorrections_2025KIT_DY_bs_PU_MuonSF.root",
+            "RECREATE"
+        );
+
 
     if(out->IsZombie())
     {
-        cerr<<"ERROR: Cannot create output ROOT file"
-            <<endl;
+        std::cerr
+            << "ERROR: Cannot create output ROOT file"
+            << std::endl;
+
         return;
     }
+
 
     // ========================================================================
     // WRITE HISTOGRAMS
@@ -914,8 +1418,10 @@ if (chain.GetBranch("Jet_hadronFlavour"))
     h_mass_VBF->Write();
     h_mass_ggH->Write();
 
+
     out->Write();
     out->Close();
+
 
     // ========================================================================
     // CLEAN POINTERS
@@ -939,19 +1445,24 @@ if (chain.GetBranch("Jet_hadronFlavour"))
     if(nTruePU)
         delete nTruePU;
 
-    std::cout
-        <<"Output written"<<std::endl;
 
     std::cout
-        <<"\n====================================\n"
-        <<" MC ANALYSIS FINISHED\n"
-        <<" KIT muon correction applied\n"
-        <<" BeamSpot muons used\n"
-        <<" JERC MC applied\n"
-        <<" Jet ID applied\n"
-        <<" VBF/ggH categorization done\n"
-        <<" PU correctionlib weight applied\n"
-        <<" Output:\n"
-        <<" FullCorrections_2025KIT_MC_bs.root\n"
-        <<"====================================\n";
+        << "Output written"
+        << std::endl;
+
+
+    std::cout
+        << "\n====================================\n"
+        << " MC ANALYSIS FINISHED\n"
+        << " KIT muon correction applied\n"
+        << " Muon ID/ISO SF applied\n"
+        << " BeamSpot muons used\n"
+        << " JERC MC applied\n"
+        << " Jet ID applied\n"
+        << " VBF/ggH categorization done\n"
+        << " PU correctionlib weight applied\n"
+        << " B-tag SF applied\n"
+        << " Output:\n"
+        << " FullCorrections_2025KIT_DY_bs_PU_MuonSF.root\n"
+        << "====================================\n";
 }
