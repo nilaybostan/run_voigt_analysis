@@ -4,10 +4,6 @@
 // TREE-MAKER MACRO — DATA ONLY
 // CMS Run2025  (H -> mumu)
 //
-// Based on testmacro_FullCorrections_FullJetsMuons_2025kit_bs_golden_sideband_pT_2_1.C
-//
-// KEEP IN SYNC with makeTree_MC_2025.C: every block marked [SHARED] below is
-// identical in the DATA and MC macros. Edit one, copy to the other.
 //
 // WHAT CHANGED w.r.t. the histogram macro (following the Pisa/Filippo sync):
 //   * Output is a flat TTree ("HmmTree"), NOT a set of histograms.
