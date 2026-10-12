@@ -1,6 +1,5 @@
 // ============================================================================
 // Nilay Bostan
-// CERN - October 2026
 //
 // TREE-MAKER MACRO — DATA ONLY
 // CMS Run2025  (H -> mumu)
