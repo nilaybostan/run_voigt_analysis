@@ -1,6 +1,5 @@
 // ============================================================================
-// Nilay Bostan - CERN - October 2026
-//
+// Nilay Bostan 
 // TREE-MAKER MACRO — MC ONLY
 // CMS Hmumu Run2025 MCs
 //
