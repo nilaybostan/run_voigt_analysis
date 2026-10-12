@@ -1,9 +1,13 @@
 // ============================================================================
-// Nilay Bostan
+// Nilay Bostan October 2026
 //
 // TREE-MAKER MACRO — DATA ONLY
 // CMS Run2024  (H -> mumu)
 //
+// Based on testmacro_FullCorrections_FullJetsMuons_2025kit_bs_golden_sideband_pT_2_1.C
+//
+// KEEP IN SYNC with makeTree_MC_2025.C: every block marked [SHARED] below is
+// identical in the DATA and MC macros. Edit one, copy to the other.
 //
 // WHAT CHANGED w.r.t. the histogram macro (following the Pisa/Filippo sync):
 //   * Output is a flat TTree ("HmmTree"), NOT a set of histograms.
@@ -31,6 +35,7 @@
 #pragma cling add_library_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/lib")
 #pragma cling load("correctionlib")
 
+#include <TNamed.h>
 #include "JetCorrections.h"
 #include "correction.h"
 
@@ -542,7 +547,10 @@ void makeTree_DATA_2024(
         "2024H_Muon.json",
 
     const std::string &outFile =
-        "/eos/user/n/nbostan/2025_Samples/tree_DATA_2024_loose.root"
+        "/eos/user/n/nbostan/2025_Samples/tree_DATA_2024_loose.root",
+
+    // [ADDED] sample identifier stored in the tree (e.g. "Muon_Run2024C")
+    const std::string &sampleName = ""
 
 ) {
 
@@ -636,6 +644,39 @@ void makeTree_DATA_2024(
                                                 "Flag_hfNoisyHitsFilter");
 
   TTreeReaderValue<bool> HLT_IsoMu24(reader, "HLT_IsoMu24");
+
+  // ---- [ADDED] electrons (for the electron-veto flag) and MET (optional) ----
+  bool hasEle = chain.GetBranch("Electron_pt") && chain.GetBranch("Electron_eta") &&
+                chain.GetBranch("Electron_mvaIso_WP90");
+  TTreeReaderArray<float> *Electron_pt = nullptr;
+  TTreeReaderArray<float> *Electron_eta = nullptr;
+  TTreeReaderArray<bool> *Electron_mvaIso_WP90 = nullptr;
+  if (hasEle) {
+    Electron_pt = new TTreeReaderArray<float>(reader, "Electron_pt");
+    Electron_eta = new TTreeReaderArray<float>(reader, "Electron_eta");
+    Electron_mvaIso_WP90 =
+        new TTreeReaderArray<bool>(reader, "Electron_mvaIso_WP90");
+  } else {
+    std::cerr << "WARNING: Electron branches not found, passEleVeto = true"
+              << std::endl;
+  }
+
+  bool hasPuppiMET = chain.GetBranch("PuppiMET_pt") && chain.GetBranch("PuppiMET_phi");
+  bool hasPFMET = chain.GetBranch("MET_pt") && chain.GetBranch("MET_phi");
+  TTreeReaderValue<float> *PuppiMET_pt = nullptr;
+  TTreeReaderValue<float> *PuppiMET_phi = nullptr;
+  TTreeReaderValue<float> *PFMET_pt = nullptr;
+  TTreeReaderValue<float> *PFMET_phi = nullptr;
+  if (hasPuppiMET) {
+    PuppiMET_pt = new TTreeReaderValue<float>(reader, "PuppiMET_pt");
+    PuppiMET_phi = new TTreeReaderValue<float>(reader, "PuppiMET_phi");
+  } else {
+    std::cerr << "WARNING: PuppiMET branches not found" << std::endl;
+  }
+  if (hasPFMET) {
+    PFMET_pt = new TTreeReaderValue<float>(reader, "MET_pt");
+    PFMET_phi = new TTreeReaderValue<float>(reader, "MET_phi");
+  }
 
   TTreeReaderValue<int> nMuon(reader, "nMuon");
   TTreeReaderArray<float> Muon_pt(reader, "Muon_pt");
@@ -745,6 +786,13 @@ void makeTree_DATA_2024(
   Bool_t b_passJetVetoMap = false, b_passBVeto = false, b_selFull = false;
 
   Bool_t b_inWindow_115_135 = false;
+
+  // ---- [ADDED] sample id, electron veto, MET
+  std::string b_sample = sampleName;
+  Bool_t b_passEleVeto = true;
+  Int_t b_nEleVeto = 0;
+  Float_t b_puppimet_pt = -1, b_puppimet_phi = -99;
+  Float_t b_pfmet_pt = -1, b_pfmet_phi = -99;
   Int_t b_massRegion = -1; // 0: m<115, 1: 115<=m<=135, 2: m>135
 
   Bool_t b_cat_isVBF[2] = {false, false}; // [0] two leading jets, [1] max mjj
@@ -797,6 +845,13 @@ void makeTree_DATA_2024(
   tree->Branch("passBVeto", &b_passBVeto, "passBVeto/O");
   tree->Branch("sel_full", &b_selFull, "sel_full/O");
 
+  tree->Branch("sample", &b_sample);
+  tree->Branch("passEleVeto", &b_passEleVeto, "passEleVeto/O");
+  tree->Branch("nEleVeto", &b_nEleVeto, "nEleVeto/I");
+  tree->Branch("puppimet_pt", &b_puppimet_pt, "puppimet_pt/F");
+  tree->Branch("puppimet_phi", &b_puppimet_phi, "puppimet_phi/F");
+  tree->Branch("pfmet_pt", &b_pfmet_pt, "pfmet_pt/F");
+  tree->Branch("pfmet_phi", &b_pfmet_phi, "pfmet_phi/F");
   tree->Branch("inWindow_115_135", &b_inWindow_115_135, "inWindow_115_135/O");
   tree->Branch("massRegion", &b_massRegion, "massRegion/I");
 
@@ -1304,6 +1359,26 @@ void makeTree_DATA_2024(
       v_jet_passAnalysis.push_back(ji.passAnalysis);
     }
 
+    // ---- [ADDED] electron veto flag (Purdue sync: pT>20, |eta|<2.5,
+    //      exclude 1.44<|eta|<1.57, MVA-iso WP90). Stored as a flag, NOT cut on.
+    int nEleVeto = 0;
+    if (hasEle) {
+      for (size_t ie = 0; ie < Electron_pt->GetSize(); ie++) {
+        double ae = fabs((*Electron_eta)[ie]);
+        if ((*Electron_pt)[ie] > 20. && ae < 2.5 && !(ae > 1.44 && ae < 1.57) &&
+            (*Electron_mvaIso_WP90)[ie])
+          nEleVeto++;
+      }
+    }
+    b_nEleVeto = nEleVeto;
+    b_passEleVeto = (nEleVeto == 0);
+
+    // ---- [ADDED] MET (NanoAOD values, no re-propagation of the macro's JERC)
+    b_puppimet_pt = hasPuppiMET ? **PuppiMET_pt : -1.f;
+    b_puppimet_phi = hasPuppiMET ? **PuppiMET_phi : -99.f;
+    b_pfmet_pt = hasPFMET ? **PFMET_pt : -1.f;
+    b_pfmet_phi = hasPFMET ? **PFMET_phi : -99.f;
+
     tree->Fill();
 
   } // while(reader.Next())
@@ -1333,6 +1408,12 @@ void makeTree_DATA_2024(
   out.cd();
 
   tree->Write();
+
+  TNamed("METCollection",
+         "PuppiMET_pt/phi (NanoAOD PuppiMET) stored as puppimet_*; PF MET "
+         "(MET_pt/phi) stored as pfmet_*; no re-propagation of macro JERC")
+      .Write();
+  TNamed("sampleName", sampleName.c_str()).Write();
 
   out.Close();
 
