@@ -1,3 +1,4 @@
+[nbostan@lxplus941 post2022E-update]$ cat makeTree_MC_2025.C
 // ============================================================================
 // Nilay Bostan - October 2026
 // TREE-MAKER MACRO -- MC ONLY (AGREED SYNC SELECTION), CMS Hmumu Run2024 MC
@@ -5,9 +6,26 @@
 // KEEP IN SYNC with makeTree_DATA_2025.C: the [SHARED] block is identical in both.
 // See the header of makeTree_DATA_2025.C for the selection description.
 //
+// MUON / DIMUON VARIABLES (colleague corrections, Oct 2026)
+//   Official m(mumu) = mm_mass_fsr : pT = BSC pT if chi2_BSC < 30 else NanoAOD pT,
+//   then ScaRe, then FSR. mm_mass_corr is ScaRe ONLY (no FSR) and is NOT m(mumu).
+//   massRegion / inWindow_115_135 are computed from mm_mass_fsr.
+//   Single-muon pT, i = 1 (leading) / 2 (subleading after ScaRe+FSR re-sort):
+//     mu{i}_pt, mu{i}_pt_nano   NanoAOD Muon_pt (no BSC, no ScaRe, no FSR)
+//     mu{i}_pt_nano_corr        NanoAOD pT + ScaRe
+//     mu{i}_pt_nano_corr_FSR    NanoAOD pT + ScaRe + FSR
+//     mu{i}_pt_raw_noCorr       BSC pT (chi2<30) else Nano pT, no ScaRe, no FSR
+//     mu{i}_pt_raw_scale        same, only Scale applied (no Res, no FSR)
+//     mu{i}_pt_raw_corr         same, ScaRe (no FSR)
+//     mu{i}_pt_FSR_noCorr       same, FSR (no ScaRe)
+//     mu{i}_pt_FSR_corr         same, ScaRe + FSR
+//   Jets: |eta| < 4.7. jet{1,2}_{pt,pt_nano,pt_raw,eta,phi,mass,btag} = two leading
+//   analysis jets; jj_{dphi,dR,y,zstar}[mode]; cat_id[mode] = -1 (b-veto fail), 0 ggH, 1 VBF.
+//
 // MC weights (stored separately):
-//   w_gen, w_norm, w_pu, w_muID[2] / w_muID_tot, w_btag, w_total
-//   w_total = w_gen * w_norm * w_pu * w_muID_tot * w_btag
+//   w_gen, w_norm, w_pu, w_muID[2] / w_muID_tot, w_btag, w_total, w_total_noBtag
+//   w_total        = w_gen * w_norm * w_pu * w_muID_tot * w_btag
+//   w_total_noBtag = w_gen * w_norm * w_pu * w_muID_tot   (same as w_total, without w_btag)
 // NORMALIZATION: w_norm = xsec*lumi / sum(genWeight) over ALL input files of ONE
 // call. Run each MC sample in a single call. Full MC sample, no era splitting:
 // lumi_fb must be the TOTAL 2024 luminosity used for the data.
@@ -132,12 +150,9 @@ static const double kBlindHi = 135.;
 // jets
 static const double kJetPtStore = 15.;   // stored in the tree (veto-map threshold)
 static const double kJetPtMin = 30.;     // analysis jet pT after JERC
-// !!! The slide says |eta| < 2.4, but the forward-jet table (HE/HF rules) only
-// makes sense if jets reach the forward region. With 2.4 almost no VBF event
-// survives (dEta > 2.5 and mjj > 400 need forward jets). Default = 4.7.
-// A second set of flags with |eta| < 2.4 (..._eta24) is ALWAYS stored too.
+// Analysis jets: |eta| < 4.7 (agreed selection; needed for VBF: dEta > 2.5 and
+// mjj > 400 require forward jets). There is no |eta| < 2.4 jet selection.
 static const double kJetEtaMax = 4.7;
-static const double kJetEtaCentral = 2.4;
 static const double kBtagEtaMax = 2.5;
 
 // electron veto (slide: |eta| < 2.5, pT > 20, MVA WP90). Gap exclusion was in
@@ -154,8 +169,14 @@ double gBtagWP_M = -1.;
 struct MuInfo {
   int nanoIdx = -1;
   float ptNano = 0, ptBS = -1, chi2BS = -1;
-  float ptUsed = 0; // before ScaRe (BS-constrained if used)
-  float ptCorr = 0; // after ScaRe
+  float ptUsed = 0; // before ScaRe (BS-constrained if chi2 < 30, else NanoAOD pT)
+  float ptCorr = 0; // after ScaRe (on ptUsed), no FSR
+  // --- single-muon pT variants (filled in the main loop, before the final re-sort)
+  float ptNanoCorr = 0;    // NanoAOD pT + ScaRe (no BSC, no FSR)
+  float ptNanoCorrFSR = 0; // NanoAOD pT + ScaRe + FSR (no BSC)
+  float ptRawScale = 0;    // ptUsed, only the scale (multiplicative) part, no Res, no FSR
+  float ptFSRnoCorr = 0;   // ptUsed + FSR (no ScaRe)
+  float ptFSRcorr = 0;     // ptUsed + ScaRe + FSR   (the pT used for m_mumu)
   float eta = 0, phi = 0, iso = 0;
   float trigDR = -1;
   float idSF = 1; // MC only
@@ -175,7 +196,7 @@ struct JetInfo {
 struct DijetInfo {
   bool has = false, vbf = false;
   int i1 = -1, i2 = -1;
-  float mass = -1, pt = -1, eta = -99, deta = -1;
+  float mass = -1, pt = -1, eta = -99, deta = -1, dphi = -1, dR = -1, y = -99;
 };
 
 // ============================================================================
@@ -192,6 +213,14 @@ double deltaR(double eta1, double phi1, double eta2, double phi2) {
   double deta = eta1 - eta2;
   double dphi = deltaPhi(phi1, phi2);
   return sqrt(deta * deta + dphi * dphi);
+}
+
+// pT of (muon with given pT, eta, phi) + FSR photon; unchanged if no photon.
+double ptWithFSR(double pt, double eta, double phi, const TLorentzVector &gamma, bool has) {
+  if (!has) return pt;
+  TLorentzVector m;
+  m.SetPtEtaPhiM(pt, eta, phi, kMuMass);
+  return (m + gamma).Pt();
 }
 
 // ============================================================================
@@ -294,6 +323,9 @@ DijetInfo evalDijet(const std::vector<JetInfo> &jets, const std::vector<int> &an
   d.has = true; d.i1 = i1; d.i2 = i2;
   d.mass = jj.M(); d.pt = jj.Pt(); d.eta = jj.Eta();
   d.deta = fabs(j1.Eta() - j2.Eta());
+  d.dphi = fabs(deltaPhi(j1.Phi(), j2.Phi()));
+  d.dR = j1.DeltaR(j2);
+  d.y = jj.Rapidity();
   d.vbf = passBVeto && d.mass > 400. && d.deta > 2.5 && j1.Pt() > 35. && j2.Pt() > 30.;
   return d;
 }
@@ -411,6 +443,15 @@ double getCorrectedMuonPt_MC(double pt, double eta, double phi, bool isBSC) {
   double m = m_corr->evaluate({eta, phi, "nom"});
   double a = a_corr->evaluate({eta, phi, "nom"});
   return pt * m + a;
+}
+
+// Scale-only ScaRe: multiplicative term only (pt * m), without the additive term a.
+// ASSUMPTION (confirm with the ScaRe authors): "scale" = m, "resolution" = a.
+// Used only for the mu{i}_pt_raw_scale branch.
+double getScaleOnlyMuonPt_MC(double pt, double eta, double phi, bool isBSC) {
+  const auto &m_corr = isBSC ? muon_m_mc_BSC : muon_m_mc_Regular;
+  if (!m_corr) return pt;
+  return pt * m_corr->evaluate({eta, phi, "nom"});
 }
 
 double getMuonIDSF(double pt, double eta) {
@@ -654,11 +695,10 @@ void makeTree_MC_2024(
   Int_t b_massRegion = -1;
 
   Bool_t b_cat_isVBF[2] = {false, false}, b_cat_isGGH[2] = {false, false};
-  Bool_t b_cat_isVBF24[2] = {false, false}, b_cat_isGGH24[2] = {false, false};
   Int_t b_nJetsStored = 0, b_nJetsAna = 0, b_nMediumB = 0, b_nLooseB = 0;
 
   Float_t b_w_gen = 1, b_w_norm = 1, b_w_pu = 1, b_w_muID[2] = {1, 1}, b_w_muID_tot = 1,
-          b_w_btag = 1, b_w_total = 1, b_nTruePU = -1;
+          b_w_btag = 1, b_w_total = 1, b_w_total_noBtag = 1, b_nTruePU = -1;
 
   Float_t b_mu_pt_nano[2], b_mu_pt_bs[2], b_mu_chi2_bs[2], b_mu_pt_uncorr[2], b_mu_pt_corr[2],
       b_mu_eta[2], b_mu_phi[2], b_mu_iso[2], b_mu_trigDR[2];
@@ -671,10 +711,24 @@ void makeTree_MC_2024(
   Float_t b_mu_fsr_pt[2] = {0, 0};
   Bool_t b_mu_hasFSR[2] = {false, false};
   Int_t b_nFSR = 0;
+  Float_t b_mm_eta_fsr = -99, b_mm_phi_fsr = -99, b_mm_y_fsr = -99, b_mm_dR = -1;
 
-  Bool_t b_jj_has[2], b_jj24_has[2];
-  Float_t b_jj_mass[2], b_jj_pt[2], b_jj_eta[2], b_jj_deta[2], b_jj24_mass[2], b_jj24_deta[2];
-  Int_t b_jj_idx1[2], b_jj_idx2[2], b_jj24_idx1[2], b_jj24_idx2[2];
+  // single-muon pT variants: [variant][0 = leading, 1 = subleading]
+  const int kNMuVar = 9;
+  const char *kMuVarNames[9] = {"pt", "pt_nano", "pt_nano_corr", "pt_nano_corr_FSR",
+                                "pt_raw_noCorr", "pt_raw_scale", "pt_raw_corr",
+                                "pt_FSR_noCorr", "pt_FSR_corr"};
+  Float_t b_muv[9][2] = {};
+  // two leading analysis jets: [variable][0 = leading, 1 = subleading]
+  const int kNJetVar = 7;
+  const char *kJetVarNames[7] = {"pt", "pt_nano", "pt_raw", "eta", "phi", "mass", "btag"};
+  Float_t b_jv[7][2];
+  Float_t b_jj_dphi[2], b_jj_dR[2], b_jj_y[2], b_jj_zstar[2];
+  Int_t b_cat_id[2] = {-1, -1};
+
+  Bool_t b_jj_has[2];
+  Float_t b_jj_mass[2], b_jj_pt[2], b_jj_eta[2], b_jj_deta[2];
+  Int_t b_jj_idx1[2], b_jj_idx2[2];
 
   std::vector<float> v_jet_pt, v_jet_pt_nano, v_jet_pt_raw, v_jet_eta, v_jet_phi, v_jet_mass,
       v_jet_btag, v_jet_chEmEF, v_jet_neEmEF, v_jet_dRmu, v_jet_btagSF;
@@ -714,8 +768,6 @@ void makeTree_MC_2024(
 
   tree->Branch("cat_isVBF", b_cat_isVBF, "cat_isVBF[2]/O");
   tree->Branch("cat_isGGH", b_cat_isGGH, "cat_isGGH[2]/O");
-  tree->Branch("cat_isVBF_eta24", b_cat_isVBF24, "cat_isVBF_eta24[2]/O");
-  tree->Branch("cat_isGGH_eta24", b_cat_isGGH24, "cat_isGGH_eta24[2]/O");
 
   tree->Branch("nJetsStored", &b_nJetsStored, "nJetsStored/I");
   tree->Branch("nJetsAna", &b_nJetsAna, "nJetsAna/I");
@@ -729,6 +781,7 @@ void makeTree_MC_2024(
   tree->Branch("w_muID_tot", &b_w_muID_tot, "w_muID_tot/F");
   tree->Branch("w_btag", &b_w_btag, "w_btag/F");
   tree->Branch("w_total", &b_w_total, "w_total/F");
+  tree->Branch("w_total_noBtag", &b_w_total_noBtag, "w_total_noBtag/F"); // w_total without w_btag
   tree->Branch("nTruePU", &b_nTruePU, "nTruePU/F");
 
   tree->Branch("mu_pt_nano", b_mu_pt_nano, "mu_pt_nano[2]/F");
@@ -746,7 +799,7 @@ void makeTree_MC_2024(
   tree->Branch("mu_trigMatched", b_mu_trigMatched, "mu_trigMatched[2]/O");
 
   tree->Branch("mm_mass_raw", &b_mm_mass_raw, "mm_mass_raw/F");
-  tree->Branch("mm_mass_corr", &b_mm_mass_corr, "mm_mass_corr/F");
+  tree->Branch("mm_mass_corr", &b_mm_mass_corr, "mm_mass_corr/F"); // ScaRe only, NO FSR (use mm_mass_fsr)
   tree->Branch("mm_mass_uncorr", &b_mm_mass_uncorr, "mm_mass_uncorr/F");
   tree->Branch("mm_pt_corr", &b_mm_pt_corr, "mm_pt_corr/F");
   tree->Branch("mm_pt_uncorr", &b_mm_pt_uncorr, "mm_pt_uncorr/F");
@@ -757,6 +810,25 @@ void makeTree_MC_2024(
   tree->Branch("mu_fsr_pt", b_mu_fsr_pt, "mu_fsr_pt[2]/F");
   tree->Branch("mu_hasFSR", b_mu_hasFSR, "mu_hasFSR[2]/O");
   tree->Branch("nFSR", &b_nFSR, "nFSR/I");
+  tree->Branch("mm_eta_fsr", &b_mm_eta_fsr, "mm_eta_fsr/F");
+  tree->Branch("mm_phi_fsr", &b_mm_phi_fsr, "mm_phi_fsr/F");
+  tree->Branch("mm_y_fsr", &b_mm_y_fsr, "mm_y_fsr/F");
+  tree->Branch("mm_dR", &b_mm_dR, "mm_dR/F");
+  for (int v = 0; v < kNMuVar; v++)
+    for (int i = 0; i < 2; i++) {
+      std::string n = "mu" + std::to_string(i + 1) + "_" + kMuVarNames[v];
+      tree->Branch(n.c_str(), &b_muv[v][i], (n + "/F").c_str());
+    }
+  for (int v = 0; v < kNJetVar; v++)
+    for (int k = 0; k < 2; k++) {
+      std::string n = "jet" + std::to_string(k + 1) + "_" + kJetVarNames[v];
+      tree->Branch(n.c_str(), &b_jv[v][k], (n + "/F").c_str());
+    }
+  tree->Branch("jj_dphi", b_jj_dphi, "jj_dphi[2]/F");
+  tree->Branch("jj_dR", b_jj_dR, "jj_dR[2]/F");
+  tree->Branch("jj_y", b_jj_y, "jj_y[2]/F");
+  tree->Branch("jj_zstar", b_jj_zstar, "jj_zstar[2]/F");
+  tree->Branch("cat_id", b_cat_id, "cat_id[2]/I");
 
   tree->Branch("jj_has", b_jj_has, "jj_has[2]/O");
   tree->Branch("jj_mass", b_jj_mass, "jj_mass[2]/F");
@@ -765,11 +837,6 @@ void makeTree_MC_2024(
   tree->Branch("jj_deta", b_jj_deta, "jj_deta[2]/F");
   tree->Branch("jj_idx1", b_jj_idx1, "jj_idx1[2]/I");
   tree->Branch("jj_idx2", b_jj_idx2, "jj_idx2[2]/I");
-  tree->Branch("jj_has_eta24", b_jj24_has, "jj_has_eta24[2]/O");
-  tree->Branch("jj_mass_eta24", b_jj24_mass, "jj_mass_eta24[2]/F");
-  tree->Branch("jj_deta_eta24", b_jj24_deta, "jj_deta_eta24[2]/F");
-  tree->Branch("jj_idx1_eta24", b_jj24_idx1, "jj_idx1_eta24[2]/I");
-  tree->Branch("jj_idx2_eta24", b_jj24_idx2, "jj_idx2_eta24[2]/I");
 
   tree->Branch("jet_pt", &v_jet_pt);
   tree->Branch("jet_pt_nano", &v_jet_pt_nano);
@@ -791,7 +858,7 @@ void makeTree_MC_2024(
   tree->Branch("jet_passAnalysis", &v_jet_passAnalysis);
 
   Long64_t nTotal = 0, nMETFilter = 0, nTrigger = 0, nTwoMuon = 0, nOS = 0, nPre = 0,
-           nSelFull = 0, nVBF0 = 0, nVBF1 = 0, nVBF0_24 = 0, nVBF1_24 = 0;
+           nSelFull = 0, nVBF0 = 0, nVBF1 = 0;
 
   // ========================================================================
   // EVENT LOOP
@@ -872,6 +939,15 @@ void makeTree_MC_2024(
     }
     const int nFSRUsed = (int)muHasFSR[0] + (int)muHasFSR[1];
 
+    // ---- single-muon pT variants (before the re-sort, so they travel with mu[i])
+    for (int i = 0; i < 2; i++) {
+      mu[i].ptNanoCorr = getCorrectedMuonPt_MC(mu[i].ptNano, mu[i].eta, mu[i].phi, false);
+      mu[i].ptNanoCorrFSR = ptWithFSR(mu[i].ptNanoCorr, mu[i].eta, mu[i].phi, bestPhoton[i], muHasFSR[i]);
+      mu[i].ptRawScale = getScaleOnlyMuonPt_MC(mu[i].ptUsed, mu[i].eta, mu[i].phi, mu[i].usedBS);
+      mu[i].ptFSRnoCorr = ptWithFSR(mu[i].ptUsed, mu[i].eta, mu[i].phi, bestPhoton[i], muHasFSR[i]);
+      mu[i].ptFSRcorr = mF[i].Pt();
+    }
+
     // re-sort by pT AFTER ScaRe + FSR: index 0 = leading
     if (mF[1].Pt() > mF[0].Pt()) {
       std::swap(mu[0], mu[1]);
@@ -898,7 +974,8 @@ void makeTree_MC_2024(
     TLorentzVector dimuon = mC[0] + mC[1];
     TLorentzVector dimuonU = mU0 + mU1;
     TLorentzVector dimuonFSR = mF[0] + mF[1];
-    const double mll = dimuon.M();
+    const double mll = dimuon.M();          // ScaRe only, no FSR
+    const double mllFSR = dimuonFSR.M();    // official m(mumu): ScaRe + FSR
 
     // ====================================================================
     // JETS
@@ -944,7 +1021,7 @@ void makeTree_MC_2024(
     std::sort(jets.begin(), jets.end(),
               [](const JetInfo &a, const JetInfo &b) { return a.p4.Pt() > b.p4.Pt(); });
 
-    std::vector<int> ana, ana24;
+    std::vector<int> ana;
     double btagWeight = 1.0;
     int nMediumB = 0, nLooseB = 0;
 
@@ -953,7 +1030,6 @@ void makeTree_MC_2024(
       if (!ji.passAnalysis) continue;
       ana.push_back((int)k);
       double absEta = fabs(ji.p4.Eta());
-      if (absEta < kJetEtaCentral) ana24.push_back((int)k);
       if (absEta >= kBtagEtaMax) continue; // b-tag only in the tracker
 
       if (ji.btag > gBtagWP_M) nMediumB++;
@@ -973,14 +1049,17 @@ void makeTree_MC_2024(
       DijetInfo d = evalDijet(jets, ana, m, passBVeto);
       b_jj_has[m] = d.has; b_jj_idx1[m] = d.i1; b_jj_idx2[m] = d.i2;
       b_jj_mass[m] = d.mass; b_jj_pt[m] = d.pt; b_jj_eta[m] = d.eta; b_jj_deta[m] = d.deta;
+      b_jj_dphi[m] = d.dphi; b_jj_dR[m] = d.dR; b_jj_y[m] = d.y;
+      b_jj_zstar[m] = -99;
+      if (d.has) {
+        const double y1 = jets[d.i1].p4.Rapidity(), y2 = jets[d.i2].p4.Rapidity();
+        const double dy = fabs(y1 - y2);
+        if (dy > 0.) b_jj_zstar[m] = (dimuonFSR.Rapidity() - 0.5 * (y1 + y2)) / dy;
+      }
+      b_cat_id[m] = !passBVeto ? -1 : (d.vbf ? 1 : 0); // -1 b-veto fail, 0 ggH, 1 VBF
       b_cat_isVBF[m] = d.vbf;
       b_cat_isGGH[m] = passBVeto && !d.vbf;
 
-      DijetInfo c = evalDijet(jets, ana24, m, passBVeto);
-      b_jj24_has[m] = c.has; b_jj24_idx1[m] = c.i1; b_jj24_idx2[m] = c.i2;
-      b_jj24_mass[m] = c.mass; b_jj24_deta[m] = c.deta;
-      b_cat_isVBF24[m] = c.vbf;
-      b_cat_isGGH24[m] = passBVeto && !c.vbf;
     }
 
     int nEleVeto = hasEle ? countVetoElectrons(*Electron_pt, *Electron_eta, *Electron_mvaIso_WP90) : 0;
@@ -1006,6 +1085,7 @@ void makeTree_MC_2024(
     b_w_muID_tot = wMuTot;
     b_w_btag = btagWeight;
     b_w_total = wGen * normFactor * wPU * wMuTot * btagWeight;
+    b_w_total_noBtag = wGen * normFactor * wPU * wMuTot; // same as w_total, without w_btag
 
     // ====================================================================
     // FILL
@@ -1037,12 +1117,11 @@ void makeTree_MC_2024(
       nSelFull++;
       if (b_cat_isVBF[0]) nVBF0++;
       if (b_cat_isVBF[1]) nVBF1++;
-      if (b_cat_isVBF24[0]) nVBF0_24++;
-      if (b_cat_isVBF24[1]) nVBF1_24++;
     }
 
-    b_inWindow_115_135 = (mll > 115.0 && mll < 135.0);
-    b_massRegion = (mll < 115.0) ? 0 : ((mll <= 135.0) ? 1 : 2);
+    // regions from the OFFICIAL m(mumu) = ScaRe + FSR (BSC/Nano pT)
+    b_inWindow_115_135 = (mllFSR > 115.0 && mllFSR < 135.0);
+    b_massRegion = (mllFSR < 115.0) ? 0 : ((mllFSR <= 135.0) ? 1 : 2);
 
     b_nJetsStored = (int)jets.size();
     b_nJetsAna = (int)ana.size();
@@ -1067,6 +1146,13 @@ void makeTree_MC_2024(
       b_mu_hasFSR[i] = muHasFSR[i];
     }
 
+    for (int i = 0; i < 2; i++) {
+      const float vals[9] = {mu[i].ptNano, mu[i].ptNano, mu[i].ptNanoCorr, mu[i].ptNanoCorrFSR,
+                             mu[i].ptUsed, mu[i].ptRawScale, mu[i].ptCorr,
+                             mu[i].ptFSRnoCorr, mu[i].ptFSRcorr};
+      for (int v = 0; v < kNMuVar; v++) b_muv[v][i] = vals[v];
+    }
+
     b_mm_mass_raw = mRaw;
     b_mm_mass_corr = mll;
     b_mm_mass_uncorr = dimuonU.M();
@@ -1077,6 +1163,22 @@ void makeTree_MC_2024(
     b_mm_mass_fsr = dimuonFSR.M();
     b_mm_pt_fsr = dimuonFSR.Pt();
     b_nFSR = nFSRUsed;
+    b_mm_eta_fsr = dimuonFSR.Eta();
+    b_mm_phi_fsr = dimuonFSR.Phi();
+    b_mm_y_fsr = dimuonFSR.Rapidity();
+    b_mm_dR = mC[0].DeltaR(mC[1]);
+
+    // two leading analysis jets (JERC-corrected pT; Nano and raw pT for comparison)
+    for (int k = 0; k < 2; k++) {
+      if ((int)ana.size() > k) {
+        const JetInfo &ji = jets[ana[k]];
+        const float vals[7] = {(float)ji.p4.Pt(), ji.ptNano, ji.ptRaw, (float)ji.p4.Eta(),
+                               (float)ji.p4.Phi(), (float)ji.p4.M(), ji.btag};
+        for (int v = 0; v < kNJetVar; v++) b_jv[v][k] = vals[v];
+      } else {
+        for (int v = 0; v < kNJetVar; v++) b_jv[v][k] = -99.f;
+      }
+    }
 
     v_jet_pt.clear(); v_jet_pt_nano.clear(); v_jet_pt_raw.clear(); v_jet_eta.clear();
     v_jet_phi.clear(); v_jet_mass.clear(); v_jet_btag.clear(); v_jet_btagSF.clear();
@@ -1123,7 +1225,6 @@ void makeTree_MC_2024(
             << "\n  raw pT>20, 50<mraw<200   = " << nPre << "  (= tree entries)"
             << "\n  of which sel_full        = " << nSelFull
             << "\n    sel_full && VBF[0] / [1]            = " << nVBF0 << " / " << nVBF1
-            << "\n    sel_full && VBF_eta24[0] / [1]      = " << nVBF0_24 << " / " << nVBF1_24
             << "\n  residual-hook failures   = " << gResidualFail << std::endl;
 
   out.cd();
@@ -1144,4 +1245,3 @@ void makeTree_MC_2024(
             << " MC TREE-MAKER FINISHED\n Output: " << outFile
             << "\n====================================\n";
 }
-
