@@ -28,6 +28,12 @@
 // NORMALIZATION: w_norm = xsec*lumi / sum(genWeight) over ALL input files of ONE
 // call. Run each MC sample in a single call. Full MC sample, no era splitting:
 // lumi_fb must be the TOTAL 2024 luminosity used for the data.
+//
+// FIXES (Oct 22, 2026):
+//   * Jet_genJetIdx is Short_t in NanoAOD -> TTreeReaderArray<Short_t>
+//     (the old <int> reader failed, which broke the gen-jet matching used by JER).
+//   * getMuonIDSF: muons with |eta| >= 2.4 are outside the SF map; return 1
+//     (they fail passMuonEta anyway) instead of printing a warning.
 // ============================================================================
 
 #pragma cling add_include_path("/cvmfs/cms.cern.ch/el9_amd64_gcc12/external/py3-correctionlib/2.2.2-120738cfaaf3f7c1056fe67d97e25dac/lib/python3.9/site-packages/correctionlib/include")
@@ -45,10 +51,175 @@
 #include <TNamed.h>
 #include "JetCorrections.h"
 #include "correction.h"
+// ----------------------------------------------------------------------------
+// Official MuonPOG ScaRe code (muonscarekit MuonScaRe.cc), inlined.
+// ----------------------------------------------------------------------------
+// ============================================================================
+// MuonScaReKit.h
+// Adapted from the official CMS MuonPOG MuonScaRe.cc (muonscarekit).
+// The physics/maths is UNCHANGED; the only differences are:
+//   * everything lives in namespace ScaRe,
+//   * the CorrectionSet is passed as an argument instead of a global `cset`
+//     (needed because the analysis uses TWO sets: BS-constrained and regular),
+//   * std:: prefixes (no `using namespace std` needed).
+//
+// Official recipe:
+//   DATA : pt_corr = ptScale(isData = true , ...)
+//   MC   : pt_corr = ptScale(isData = false, ...)  then  ptResol(...)
+// ============================================================================
+
+#include <boost/math/special_functions/erf.hpp>
+#include <cmath>
+#include <cstdint>
+#include <iostream>
+#include <string>
+
+
+namespace ScaRe {
+
+// Double-sided Crystal Ball (pdf / cdf / inverse cdf), used to draw the random
+// number that smears MC. Identical to the official implementation (including
+// pi = 3.14159, kept on purpose so numbers match the official kit).
+struct CrystalBall {
+  double pi = 3.14159;
+  double sqrtPiOver2 = std::sqrt(pi / 2.0);
+  double sqrt2 = std::sqrt(2.0);
+  double m, s, a, n;
+  double B, C, D, N, NA, Ns, NC, F, G, k;
+  double cdfMa, cdfPa;
+
+  CrystalBall() : m(0), s(1), a(10), n(10) { init(); }
+  CrystalBall(double mean, double sigma, double alpha, double nn)
+      : m(mean), s(sigma), a(alpha), n(nn) { init(); }
+
+  void init() {
+    double fa = std::fabs(a);
+    double ex = std::exp(-fa * fa / 2);
+    double A = std::pow(n / fa, n) * ex;
+    double C1 = n / fa / (n - 1) * ex;
+    double D1 = 2 * sqrtPiOver2 * std::erf(fa / sqrt2);
+    B = n / fa - fa;
+    C = (D1 + 2 * C1) / C1;
+    D = (D1 + 2 * C1) / 2;
+    N = 1.0 / s / (D1 + 2 * C1);
+    k = 1.0 / (n - 1);
+    NA = N * A;
+    Ns = N * s;
+    NC = Ns * C1;
+    F = 1 - fa * fa / n;
+    G = s * n / fa;
+    cdfMa = cdf(m - a * s);
+    cdfPa = cdf(m + a * s);
+  }
+
+  double pdf(double x) const {
+    double d = (x - m) / s;
+    if (d < -a) return NA * std::pow(B - d, -n);
+    if (d > a) return NA * std::pow(B + d, -n);
+    return N * std::exp(-d * d / 2);
+  }
+  double pdf(double x, double ks, double dm) const {
+    double d = (x - m - dm) / (s * ks);
+    if (d < -a) return NA / ks * std::pow(B - d, -n);
+    if (d > a) return NA / ks * std::pow(B + d, -n);
+    return N / ks * std::exp(-d * d / 2);
+  }
+  double cdf(double x) const {
+    double d = (x - m) / s;
+    if (d < -a) return NC / std::pow(F - s * d / G, n - 1);
+    if (d > a) return NC * (C - std::pow(F + s * d / G, 1 - n));
+    return Ns * (D - sqrtPiOver2 * std::erf(-d / sqrt2));
+  }
+  double invcdf(double u) const {
+    if (u < cdfMa) return m + G * (F - std::pow(NC / u, k));
+    if (u > cdfPa) return m - G * (F - std::pow(C - u / NC, -k));
+    return m - sqrt2 * s * boost::math::erf_inv((D - u / Ns) / sqrtPiOver2);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// MC resolution smearing helpers
+// ---------------------------------------------------------------------------
+
+// Random number following the Crystal Ball of this (|eta|, nTrackerLayers) bin.
+// Deterministic: seeded by (event, lumi, phi) through the "RandomSmearing" entry.
+inline double getRndm(const correction::CorrectionSet &cset, double eta, double phi,
+                      float nL, int evtNumber, int lumiNumber) {
+  const double aeta = std::fabs(eta);
+  const double dnL = (double)nL;
+  auto cb_params = cset.at("cb_params");
+  double mean = cb_params->evaluate({aeta, dnL, 0});
+  double sigma = cb_params->evaluate({aeta, dnL, 1});
+  double n = cb_params->evaluate({aeta, dnL, 2});
+  double alpha = cb_params->evaluate({aeta, dnL, 3});
+
+  CrystalBall cb(mean, sigma, alpha, n);
+  double rndm = cset.at("RandomSmearing")->evaluate({(int)evtNumber, (int)lumiNumber, phi});
+  return cb.invcdf(rndm);
+}
+
+// pT-dependent width of the smearing: polynomial in pT, floored at 0.
+inline double getStd(const correction::CorrectionSet &cset, double pt, double eta, float nL) {
+  const double aeta = std::fabs(eta);
+  const double dnL = (double)nL;
+  auto poly = cset.at("poly_params");
+  double p0 = poly->evaluate({aeta, dnL, 0});
+  double p1 = poly->evaluate({aeta, dnL, 1});
+  double p2 = poly->evaluate({aeta, dnL, 2});
+  double sigma = p0 + p1 * pt + p2 * pt * pt;
+  if (sigma < 0) sigma = 0;
+  return sigma;
+}
+
+// Residual smearing factor k = sqrt(k_data^2 - k_mc^2); 0 if MC is already broader.
+inline double getK(const correction::CorrectionSet &cset, double eta, const std::string &var) {
+  const double aeta = std::fabs(eta);
+  double k_data = cset.at("k_data")->evaluate({aeta, var});
+  double k_mc = cset.at("k_mc")->evaluate({aeta, var});
+  double k = 0;
+  if (k_mc < k_data) k = std::sqrt(k_data * k_data - k_mc * k_mc);
+  return k;
+}
+
+// ---------------------------------------------------------------------------
+// MC ONLY: pT resolution smearing.  Input pt = pT AFTER the scale correction.
+// Returns the input unchanged if pt < low_pt_threshold, pt > 200, NaN, or the
+// smearing factor is outside (0.1, 2).
+// ---------------------------------------------------------------------------
+inline double ptResol(const correction::CorrectionSet &cset, double pt, double eta, double phi,
+                      float nL, int evtNumber, int lumiNumber, double low_pt_threshold = 26) {
+  double rndm = getRndm(cset, eta, phi, nL, evtNumber, lumiNumber);
+  double sd = getStd(cset, pt, eta, nL);
+  double k = getK(cset, eta, "nom");
+
+  double ptc = pt * (1 + k * sd * rndm);
+  if (std::isnan(ptc)) ptc = pt;
+  if (ptc / pt > 2 || ptc / pt < 0.1 || ptc < 0 || pt < low_pt_threshold || pt > 200) ptc = pt;
+  return ptc;
+}
+
+// ---------------------------------------------------------------------------
+// DATA and MC: pT scale correction  pt' = 1 / (m/pt + charge * a)
+//   isData = true  -> a_data, m_data
+//   isData = false -> a_mc,   m_mc
+// Returns pt unchanged if pt < low_pt_threshold.
+// ---------------------------------------------------------------------------
+inline double ptScale(const correction::CorrectionSet &cset, bool isData, double pt, double eta,
+                      double phi, int charge, double low_pt_threshold = 26) {
+  if (pt < low_pt_threshold) return pt;
+  const std::string dtmc = isData ? "data" : "mc";
+  const std::string nom = "nom";
+  double a = cset.at("a_" + dtmc)->evaluate({eta, phi, nom});
+  double m = cset.at("m_" + dtmc)->evaluate({eta, phi, nom});
+  return 1. / (m / pt + charge * a);
+}
+
+}  // namespace ScaRe
 
 #include <TChain.h>
 #include <TError.h>
 #include <TFile.h>
+#include <TLeaf.h>
 #include <TLorentzVector.h>
 #include <TTree.h>
 #include <TTreeReader.h>
@@ -167,13 +338,14 @@ double gBtagWP_M = -1.;
 // ============================================================================
 struct MuInfo {
   int nanoIdx = -1;
+  int nL = 0; // Muon_nTrackerLayers (needed by the ScaRe resolution smearing)
   float ptNano = 0, ptBS = -1, chi2BS = -1;
   float ptUsed = 0; // before ScaRe (BS-constrained if chi2 < 30, else NanoAOD pT)
   float ptCorr = 0; // after ScaRe (on ptUsed), no FSR
   // --- single-muon pT variants (filled in the main loop, before the final re-sort)
   float ptNanoCorr = 0;    // NanoAOD pT + ScaRe (no BSC, no FSR)
   float ptNanoCorrFSR = 0; // NanoAOD pT + ScaRe + FSR (no BSC)
-  float ptRawScale = 0;    // ptUsed, only the scale (multiplicative) part, no Res, no FSR
+  float ptRawScale = 0;    // ptUsed + ScaRe SCALE correction only (ptScale), no smearing, no FSR
   float ptFSRnoCorr = 0;   // ptUsed + FSR (no ScaRe)
   float ptFSRcorr = 0;     // ptUsed + ScaRe + FSR   (the pT used for m_mumu)
   float eta = 0, phi = 0, iso = 0;
@@ -197,6 +369,31 @@ struct DijetInfo {
   int i1 = -1, i2 = -1;
   float mass = -1, pt = -1, eta = -99, deta = -1, dphi = -1, dR = -1, y = -99;
 };
+
+// ============================================================================
+// MUON ScaRe  (official MuonPOG recipe, see MuonScaReKit.h)
+//   DATA : pT = ptScale(data)
+//   MC   : pT = ptScale(mc), then ptResol (Crystal-Ball smearing, needs nTrackerLayers)
+// Two correction sets: BS-constrained pT (chi2 < 30) and regular (NanoAOD) pT.
+// Muons with pT < 26 GeV (and, for the smearing, pT > 200 GeV) are left unchanged
+// by the official code.
+// ============================================================================
+std::shared_ptr<const correction::CorrectionSet> muonCorrBSC, muonCorrRegular;
+
+// scale correction only (DATA: this IS the full correction; MC: before smearing)
+double scaReScaleOnly(bool isData, double pt, double eta, double phi, int charge, bool isBSC) {
+  const correction::CorrectionSet &cs = isBSC ? *muonCorrBSC : *muonCorrRegular;
+  return ScaRe::ptScale(cs, isData, pt, eta, phi, charge);
+}
+
+// full correction: scale, plus smearing in MC
+double scaReFull(bool isData, double pt, double eta, double phi, int charge, int nL,
+                 ULong64_t evt, UInt_t lumi, bool isBSC) {
+  const correction::CorrectionSet &cs = isBSC ? *muonCorrBSC : *muonCorrRegular;
+  double ptS = ScaRe::ptScale(cs, isData, pt, eta, phi, charge);
+  if (isData) return ptS;
+  return ScaRe::ptResol(cs, ptS, eta, phi, (float)nL, (int)evt, (int)lumi);
+}
 
 // ============================================================================
 // DELTA PHI / DELTA R   (must come before the templates below)
@@ -426,35 +623,14 @@ std::vector<std::string> FilterReadableFiles(const std::vector<std::string> &inp
 // ============================================================================
 // MC-ONLY CORRECTIONS
 // ============================================================================
-std::shared_ptr<const correction::CorrectionSet> muonCorrBSC, muonCorrRegular;
-std::shared_ptr<const correction::Correction> muon_m_mc_BSC, muon_a_mc_BSC;
-std::shared_ptr<const correction::Correction> muon_m_mc_Regular, muon_a_mc_Regular;
-std::shared_ptr<const correction::Correction> btagSF, btagLightSF;
-std::shared_ptr<const correction::CorrectionSet> puCorr;
-std::shared_ptr<const correction::Correction> puWeightCorr;
-std::shared_ptr<const correction::CorrectionSet> muonSFCorr;
-std::shared_ptr<const correction::Correction> muonIDSF;
 
-double getCorrectedMuonPt_MC(double pt, double eta, double phi, bool isBSC) {
-  const auto &m_corr = isBSC ? muon_m_mc_BSC : muon_m_mc_Regular;
-  const auto &a_corr = isBSC ? muon_a_mc_BSC : muon_a_mc_Regular;
-  if (!m_corr || !a_corr) return pt;
-  double m = m_corr->evaluate({eta, phi, "nom"});
-  double a = a_corr->evaluate({eta, phi, "nom"});
-  return pt * m + a;
-}
-
-// Scale-only ScaRe: multiplicative term only (pt * m), without the additive term a.
-// ASSUMPTION (confirm with the ScaRe authors): "scale" = m, "resolution" = a.
-// Used only for the mu{i}_pt_raw_scale branch.
-double getScaleOnlyMuonPt_MC(double pt, double eta, double phi, bool isBSC) {
-  const auto &m_corr = isBSC ? muon_m_mc_BSC : muon_m_mc_Regular;
-  if (!m_corr) return pt;
-  return pt * m_corr->evaluate({eta, phi, "nom"});
-}
+std::shared_ptr<const correction::CorrectionSet> muonSFCorr, puCorr;
+std::shared_ptr<const correction::Correction> muonIDSF, puWeightCorr, btagSF, btagLightSF;
 
 double getMuonIDSF(double pt, double eta) {
   if (!muonIDSF) return 1.0;
+  // SF map ends at |eta| = 2.4; muons outside fail passMuonEta anyway -> SF = 1, no warning
+  if (fabs(eta) >= 2.4) return 1.0;
   try {
     return muonIDSF->evaluate({eta, pt, "nominal"});
   } catch (const std::exception &e) {
@@ -477,7 +653,7 @@ double getPUWeight(double nTruePU) {
 // ============================================================================
 // MAIN
 // ============================================================================
-void makeTree_MC_2024(
+void makeTree_MC_2024.C(
     std::vector<std::string> inputFiles,
     double xsec_pb,
     double lumi_fb,
@@ -499,13 +675,9 @@ void makeTree_MC_2024(
   // ---- corrections
   std::cout << "Loading BSC muon corrections..." << std::endl;
   muonCorrBSC = correction::CorrectionSet::from_file(BSCDir + "schemaV2.json");
-  muon_m_mc_BSC = muonCorrBSC->at("m_mc");
-  muon_a_mc_BSC = muonCorrBSC->at("a_mc");
 
   std::cout << "Loading Regular muon corrections..." << std::endl;
   muonCorrRegular = correction::CorrectionSet::from_file(RegularDir + "schemaV2.json");
-  muon_m_mc_Regular = muonCorrRegular->at("m_mc");
-  muon_a_mc_Regular = muonCorrRegular->at("a_mc");
 
   muonSFCorr = correction::CorrectionSet::from_file(KITDir + "muon_Z_2024.json");
   muonIDSF = muonSFCorr->at("NUM_MediumPromptID_DEN_TrackerMuons");
@@ -619,20 +791,37 @@ void makeTree_MC_2024(
   TTreeReaderArray<int> Muon_charge(reader, "Muon_charge");
   TTreeReaderArray<bool> Muon_mediumId(reader, "Muon_mediumId");
 
+  // Muon_nTrackerLayers: needed for the ScaRe resolution (cb_params / poly_params bins).
+  // Stored as Int_t in NanoAOD; fall back to UChar_t if the file says so.
+  if (!chain.GetBranch("Muon_nTrackerLayers")) {
+    std::cerr << "ERROR: branch Muon_nTrackerLayers not found (needed by ScaRe)." << std::endl;
+    return;
+  }
+  TLeaf *leafNL = chain.GetLeaf("Muon_nTrackerLayers");
+  const bool nLisUChar = leafNL && std::string(leafNL->GetTypeName()) == "UChar_t";
+  std::cout << "Muon_nTrackerLayers type = " << (leafNL ? leafNL->GetTypeName() : "?") << std::endl;
+  TTreeReaderArray<int> *Muon_nTrackerLayersI = nullptr;
+  TTreeReaderArray<unsigned char> *Muon_nTrackerLayersU = nullptr;
+  if (nLisUChar) Muon_nTrackerLayersU = new TTreeReaderArray<unsigned char>(reader, "Muon_nTrackerLayers");
+  else           Muon_nTrackerLayersI = new TTreeReaderArray<int>(reader, "Muon_nTrackerLayers");
+  auto getNL = [&](int i) -> int {
+    return nLisUChar ? (int)(*Muon_nTrackerLayersU)[i] : (*Muon_nTrackerLayersI)[i];
+  };
+
   bool hasFSR = chain.GetBranch("FsrPhoton_pt") && chain.GetBranch("FsrPhoton_eta") &&
                 chain.GetBranch("FsrPhoton_phi") && chain.GetBranch("FsrPhoton_dROverEt2") &&
                 chain.GetBranch("FsrPhoton_relIso03") && chain.GetBranch("FsrPhoton_muonIdx");
   TTreeReaderArray<float> *FsrPhoton_pt = nullptr, *FsrPhoton_eta = nullptr,
                           *FsrPhoton_phi = nullptr, *FsrPhoton_dROverEt2 = nullptr,
                           *FsrPhoton_relIso03 = nullptr;
-  TTreeReaderArray<int> *FsrPhoton_muonIdx = nullptr;
+  TTreeReaderArray<Short_t> *FsrPhoton_muonIdx = nullptr;
   if (hasFSR) {
     FsrPhoton_pt = new TTreeReaderArray<float>(reader, "FsrPhoton_pt");
     FsrPhoton_eta = new TTreeReaderArray<float>(reader, "FsrPhoton_eta");
     FsrPhoton_phi = new TTreeReaderArray<float>(reader, "FsrPhoton_phi");
     FsrPhoton_dROverEt2 = new TTreeReaderArray<float>(reader, "FsrPhoton_dROverEt2");
     FsrPhoton_relIso03 = new TTreeReaderArray<float>(reader, "FsrPhoton_relIso03");
-    FsrPhoton_muonIdx = new TTreeReaderArray<int>(reader, "FsrPhoton_muonIdx");
+    FsrPhoton_muonIdx = new TTreeReaderArray<Short_t>(reader, "FsrPhoton_muonIdx");
   }
   std::cout << "FSR photon branches = " << hasFSR << std::endl;
 
@@ -665,7 +854,8 @@ void makeTree_MC_2024(
   TTreeReaderValue<float> Rho(reader, "Rho_fixedGridRhoFastjetAll");
   TTreeReaderArray<float> Jet_btagUParTAK4B(reader, "Jet_btagUParTAK4B");
   TTreeReaderArray<unsigned char> Jet_hadronFlavour(reader, "Jet_hadronFlavour");
-  TTreeReaderArray<int> Jet_genJetIdx(reader, "Jet_genJetIdx");
+  // FIX: Jet_genJetIdx is Short_t in NanoAOD (was TTreeReaderArray<int>)
+  TTreeReaderArray<Short_t> Jet_genJetIdx(reader, "Jet_genJetIdx");
   TTreeReaderArray<float> GenJet_pt(reader, "GenJet_pt");
 
   // ---- output
@@ -676,6 +866,7 @@ void makeTree_MC_2024(
   }
   out.cd();
   TTree *tree = new TTree("HmmTree", "H->mumu loose-baseline tree (MC)");
+  tree->SetAutoSave(50000000); // ~50 MB'ta bir kaydet
 
   UInt_t b_run = 0, b_lumi = 0;
   ULong64_t b_event = 0;
@@ -856,6 +1047,13 @@ void makeTree_MC_2024(
   tree->Branch("jet_passDRmu", &v_jet_passDRmu);
   tree->Branch("jet_passAnalysis", &v_jet_passAnalysis);
 
+  // ---- reader sanity check (branch tip uyusmazligini erken yakala)
+  if (reader.SetEntry(0) != TTreeReader::kEntryValid) {
+    std::cerr << "ERROR: reader setup failed (branch type mismatch?)" << std::endl;
+    return;
+  }
+  reader.Restart();
+
   Long64_t nTotal = 0, nMETFilter = 0, nTrigger = 0, nTwoMuon = 0, nOS = 0, nPre = 0,
            nSelFull = 0, nVBF0 = 0, nVBF1 = 0;
 
@@ -902,6 +1100,7 @@ void makeTree_MC_2024(
     MuInfo mu[2];
     for (int i = 0; i < 2; i++) {
       mu[i].nanoIdx = i;
+      mu[i].nL = getNL(i);
       mu[i].ptNano = Muon_pt[i];
       mu[i].eta = Muon_eta[i];
       mu[i].phi = Muon_phi[i];
@@ -914,7 +1113,8 @@ void makeTree_MC_2024(
       }
       mu[i].usedBS = (hasBS && mu[i].chi2BS < 30.);
       mu[i].ptUsed = mu[i].usedBS ? mu[i].ptBS : mu[i].ptNano;
-      mu[i].ptCorr = getCorrectedMuonPt_MC(mu[i].ptUsed, mu[i].eta, mu[i].phi, mu[i].usedBS);
+      mu[i].ptCorr = scaReFull(false, mu[i].ptUsed, mu[i].eta, mu[i].phi, mu[i].charge, mu[i].nL,
+                               *eventNumber, *luminosityBlock, mu[i].usedBS);
       mu[i].idSF = getMuonIDSF(mu[i].ptNano, mu[i].eta);
 
       double minDR = minTrigObjDR(*nTrigObj, TrigObj_pt, TrigObj_eta, TrigObj_phi,
@@ -940,9 +1140,10 @@ void makeTree_MC_2024(
 
     // ---- single-muon pT variants (before the re-sort, so they travel with mu[i])
     for (int i = 0; i < 2; i++) {
-      mu[i].ptNanoCorr = getCorrectedMuonPt_MC(mu[i].ptNano, mu[i].eta, mu[i].phi, false);
+      mu[i].ptNanoCorr = scaReFull(false, mu[i].ptNano, mu[i].eta, mu[i].phi, mu[i].charge, mu[i].nL,
+                                    *eventNumber, *luminosityBlock, false);
       mu[i].ptNanoCorrFSR = ptWithFSR(mu[i].ptNanoCorr, mu[i].eta, mu[i].phi, bestPhoton[i], muHasFSR[i]);
-      mu[i].ptRawScale = getScaleOnlyMuonPt_MC(mu[i].ptUsed, mu[i].eta, mu[i].phi, mu[i].usedBS);
+      mu[i].ptRawScale = scaReScaleOnly(false, mu[i].ptUsed, mu[i].eta, mu[i].phi, mu[i].charge, mu[i].usedBS);
       mu[i].ptFSRnoCorr = ptWithFSR(mu[i].ptUsed, mu[i].eta, mu[i].phi, bestPhoton[i], muHasFSR[i]);
       mu[i].ptFSRcorr = mF[i].Pt();
     }
@@ -1235,6 +1436,8 @@ void makeTree_MC_2024(
   TNamed("jetEtaMax", std::to_string(kJetEtaMax).c_str()).Write();
   out.Close();
 
+  delete Muon_nTrackerLayersI;
+  delete Muon_nTrackerLayersU;
   delete Muon_bsConstrainedPt;
   delete Muon_bsConstrainedChi2;
   delete TrigObj_filterBits;
