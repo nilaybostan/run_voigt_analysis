@@ -653,7 +653,7 @@ double getPUWeight(double nTruePU) {
 // ============================================================================
 // MAIN
 // ============================================================================
-void makeTree_MC_2024.C(
+void makeTree_MC_2024(
     std::vector<std::string> inputFiles,
     double xsec_pb,
     double lumi_fb,
