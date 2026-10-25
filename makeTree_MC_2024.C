@@ -9,6 +9,8 @@
 //   Official m(mumu) = mm_mass_fsr : pT = BSC pT if chi2_BSC < 30 else NanoAOD pT,
 //   then ScaRe, then FSR. mm_mass_corr is ScaRe ONLY (no FSR) and is NOT m(mumu).
 //   massRegion / inWindow_115_135 are computed from mm_mass_fsr.
+//   mm_mass_raw = m(mumu) from NanoAOD Muon_pt of Muon[0], Muon[1]
+//   (no BS constraint, no ScaRe, no FSR).
 //   Single-muon pT, i = 1 (leading) / 2 (subleading after ScaRe+FSR re-sort):
 //     mu{i}_pt, mu{i}_pt_nano   NanoAOD Muon_pt (no BSC, no ScaRe, no FSR)
 //     mu{i}_pt_nano_corr        NanoAOD pT + ScaRe
@@ -26,8 +28,28 @@
 //   w_total        = w_gen * w_norm * w_pu * w_muID_tot * w_btag
 //   w_total_noBtag = w_gen * w_norm * w_pu * w_muID_tot   (same as w_total, without w_btag)
 // NORMALIZATION: w_norm = xsec*lumi / sum(genWeight) over ALL input files of ONE
-// call. Run each MC sample in a single call. Full MC sample, no era splitting:
-// lumi_fb must be the TOTAL 2024 luminosity used for the data.
+// call (nominal + ext1 together = ONE combined sample, one common w_norm).
+// Run each MC sample (e.g. ggH) in a single call, passing nominal AND ext1 files.
+// Full MC sample, no era splitting: lumi_fb must be the TOTAL 2024 luminosity
+// used for the data.
+//
+// DATASET IDENTIFICATION (Oct 25, 2026):
+//   Each input file is tagged from its path: a path containing "ext1" -> dataset_id = 1
+//   (ext1), otherwise 0 (nominal). The tree stores
+//     dataset_id  (Int_t: 0 = nominal, 1 = ext1)
+//     sample      (string: "<sampleName>_nominal" / "<sampleName>_ext1")
+//   The cutflow prints entries, sum(genWeight) and tree entries per dataset.
+//   Files listed more than once in inputFiles are removed (they would double-count
+//   events AND sum(genWeight)).
+//   NOTE: run/lumi/event are NOT unique across nominal and ext1 (independent
+//   productions), so check duplicates with (dataset_id, run, lumi, event).
+//
+// VBF DEBUG COUNTERS: the cutflow prints, for sel_full events and both dijet modes,
+// how many events have a dijet / mjj > 400 / + |deta| > 2.5 / + b-veto failed.
+//
+// Jet_jetId (Oct 25, 2026): NOT stored in NanoAODv15. The message is now an INFO
+// (stdout), not a WARNING; IntArrayReader prints "not in this NanoAOD" instead of
+// "type = ?". jet_jetId_nano stays in the tree (= -1) so DATA/MC branches are identical.
 //
 // FIXES (Oct 22, 2026):
 //   * Jet_genJetIdx is Short_t in NanoAOD -> TTreeReaderArray<Short_t>
@@ -250,6 +272,62 @@ std::shared_ptr<const correction::Correction> l1FastJetMC;
 std::shared_ptr<const correction::Correction> l2RelativeMC;
 std::shared_ptr<const correction::Correction> l3AbsoluteMC;
 
+// ============================================================================
+// JET ID from jetid.json.gz (AK4PUPPI)                         [Oct 25, 2026]
+//   idTight   = AK4PUPPI_Tight           -> idOK (analysis jets, "tight jetID")
+//   idTightLV = AK4PUPPI_TightLeptonVeto -> veto-map candidates
+//   Jet_jetId (NanoAOD) is stored as a cross-check: bit1 = tight, bit2 = tightLepVeto
+//   (NanoAODv15 has no Jet_jetId -> jet_jetId_nano = -1)
+// The ID inputs (fractions, multiplicities) do not depend on JEC; eta is not changed by JEC.
+// ============================================================================
+#include "JetIdJson.h"  // plain C++ jet ID generated from the jetid json (gen_jetid_cpp.py)
+std::shared_ptr<const correction::CorrectionSet> jetIdCS;
+std::shared_ptr<const correction::Correction> jetIdTight, jetIdTightLV;
+
+bool loadJetId(const std::string &file) {
+  try {
+    jetIdCS = correction::CorrectionSet::from_file(file);  // .json.gz is fine
+    jetIdTight = jetIdCS->at("AK4PUPPI_Tight");
+    jetIdTightLV = jetIdCS->at("AK4PUPPI_TightLeptonVeto");
+  } catch (const std::exception &e) {
+    std::cerr << "ERROR: cannot load jetid json " << file << ": " << e.what() << std::endl;
+    return false;
+  }
+  std::cout << "Jet ID (AK4PUPPI) loaded from: " << file << std::endl;
+  return true;
+}
+
+// bit0 = Tight, bit1 = TightLeptonVeto
+int evalJetId(double eta, double chHEF, double neHEF, double chEmEF, double neEmEF,
+              double muEF, int chMult, int neMult, int mult) {
+  const double ae = fabs(eta);
+  int bits = 0;
+  // cuts come from JetIdJson.h (generated from the json); correctionlib is not used here
+  if (jetIdPass_AK4PUPPI_Tight(ae, chHEF, neHEF, chEmEF, neEmEF, muEF, chMult, neMult, mult))
+    bits |= 1;
+  if (jetIdPass_AK4PUPPI_TightLeptonVeto(ae, chHEF, neHEF, chEmEF, neEmEF, muEF, chMult, neMult, mult))
+    bits |= 2;
+  return bits;
+}
+
+// integer array branch that is UChar_t or Int_t depending on the NanoAOD version
+struct IntArrayReader {
+  TTreeReaderArray<unsigned char> *u = nullptr;
+  TTreeReaderArray<int> *i = nullptr;
+  bool ok = false;
+  IntArrayReader(TTreeReader &reader, TChain &chain, const char *name) {
+    TLeaf *l = chain.GetLeaf(name);
+    const std::string t = l ? l->GetTypeName() : "";
+    if (t == "UChar_t") u = new TTreeReaderArray<unsigned char>(reader, name);
+    else if (t == "Int_t") i = new TTreeReaderArray<int>(reader, name);
+    if (t.empty()) std::cout << name << " : not in this NanoAOD" << std::endl;
+    else           std::cout << name << " type = " << t << std::endl;
+    ok = (u != nullptr || i != nullptr);
+  }
+  ~IntArrayReader() { delete u; delete i; }
+  int operator[](size_t k) const { return u ? (int)(*u)[k] : (i ? (*i)[k] : -1); }
+};
+
 std::shared_ptr<const correction::Correction>
 findCorrectionBySuffix(const std::shared_ptr<const correction::CorrectionSet> &cs,
                        const std::string &suffix) {
@@ -361,6 +439,8 @@ struct JetInfo {
   float btagSF = 1; // MC only
   int hadFlav = 0;  // MC only
   bool idOK = false, vetoCand = false, inVetoMap = false;
+  bool idTight = false, idTightLV = false;
+  int jetIdNano = 0; // NanoAOD Jet_jetId (cross-check)
   bool passRegion = false, passDRmu = false, passAnalysis = false;
 };
 
@@ -619,6 +699,7 @@ std::vector<std::string> FilterReadableFiles(const std::vector<std::string> &inp
 // [END SHARED]
 // ============================================================================
 
+#include <set>
 
 // ============================================================================
 // MC-ONLY CORRECTIONS
@@ -653,7 +734,7 @@ double getPUWeight(double nTruePU) {
 // ============================================================================
 // MAIN
 // ============================================================================
-void makeTree_MC_2024(
+void makeTree_MC_2024.C(
     std::vector<std::string> inputFiles,
     double xsec_pb,
     double lumi_fb,
@@ -667,7 +748,8 @@ void makeTree_MC_2024(
     // PU file/key: puWeights_H.json is era-H only. For the full 2024 sample pass the
     // full-year file/key (check `correction summary` of the json).
     const std::string &puFile = "puWeights_H.json",
-    const std::string &puKey = "Collisions24_H_goldenJSON") {
+    const std::string &puKey = "Collisions24_H_goldenJSON",
+    const std::string &jetIdJsonFile = "/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/2026-07-16/jetid.json.gz") {
 
   gErrorIgnoreLevel = kError;
   gYear = year;
@@ -697,9 +779,24 @@ void makeTree_MC_2024(
       jetJercJsonFile.empty() ? (KITDir + "jet_jerc.json") : jetJercJsonFile;
   if (!loadJetJercRegionCorrections(jercJson)) return;
 
+  if (!loadJetId(jetIdJsonFile)) return;
+
   puCorr = correction::CorrectionSet::from_file(KITDir + puFile);
   puWeightCorr = puCorr->at(puKey);
   std::cout << "PU correction loaded: " << puKey << std::endl;
+
+  // ---- input files: remove files listed more than once (a repeated file would
+  //      double-count events AND sum(genWeight))
+  {
+    std::set<std::string> seen;
+    std::vector<std::string> uniq;
+    for (auto const &f : inputFiles)
+      if (seen.insert(f).second) uniq.push_back(f);
+    if (uniq.size() != inputFiles.size())
+      std::cout << "WARNING: " << (inputFiles.size() - uniq.size())
+                << " duplicated file name(s) removed from the input list" << std::endl;
+    inputFiles = uniq;
+  }
 
   // ---- chain + normalization
   std::vector<std::string> readableFiles = FilterReadableFiles(inputFiles);
@@ -711,23 +808,44 @@ void makeTree_MC_2024(
   for (auto const &file : readableFiles) chain.Add(file.c_str());
   std::cout << "Total entries = " << chain.GetEntries() << std::endl;
 
+  // dataset id per file (same order as the chain): 0 = nominal, 1 = ext1 (from the path)
+  std::vector<int> fileDataset;
+  for (auto const &f : readableFiles)
+    fileDataset.push_back(f.find("ext1") != std::string::npos ? 1 : 0);
+  const char *kDatasetNames[2] = {"nominal", "ext1"};
+  int nFilesDS[2] = {0, 0};
+  for (int d : fileDataset) nFilesDS[d]++;
+  std::cout << "Files: nominal = " << nFilesDS[0] << ", ext1 = " << nFilesDS[1] << std::endl;
+  if (nFilesDS[1] == 0)
+    std::cerr << "WARNING: no file path contains 'ext1' -> everything is tagged as nominal" << std::endl;
+
   if (!chain.GetBranch("Jet_btagUParTAK4B")) {
     std::cerr << "ERROR: branch Jet_btagUParTAK4B not found." << std::endl;
     return;
   }
 
   double lumi_pb = lumi_fb * 1000.0;
-  double sumGenWeight = 0.0;
+  double sumGenWeight = 0.0, sumGenWeightDS[2] = {0., 0.};
+  Long64_t nEntriesDS[2] = {0, 0};
   {
     TTreeReader sumReader(&chain);
     TTreeReaderValue<float> sumGenWeightReader(sumReader, "genWeight");
-    while (sumReader.Next()) sumGenWeight += *sumGenWeightReader;
+    while (sumReader.Next()) {
+      const int ds = fileDataset[chain.GetTreeNumber()];
+      sumGenWeight += *sumGenWeightReader;
+      sumGenWeightDS[ds] += *sumGenWeightReader;
+      nEntriesDS[ds]++;
+    }
   }
-  std::cout << "Sum genWeight = " << sumGenWeight << std::endl;
+  std::cout << "Sum genWeight (ALL files) = " << sumGenWeight << std::endl;
+  for (int d = 0; d < 2; d++)
+    std::cout << "   " << kDatasetNames[d] << ": entries = " << nEntriesDS[d]
+              << ", sum genWeight = " << sumGenWeightDS[d] << std::endl;
   if (fabs(sumGenWeight) < 1e-6) {
     std::cerr << "ERROR: Invalid sumGenWeight" << std::endl;
     return;
   }
+  // ONE common normalization for the combined (nominal + ext1) sample
   double normFactor = (xsec_pb * lumi_pb) / sumGenWeight;
   std::cout << "MC normalization factor = " << normFactor << std::endl;
 
@@ -853,8 +971,29 @@ void makeTree_MC_2024(
   TTreeReaderArray<float> Jet_area(reader, "Jet_area");
   TTreeReaderValue<float> Rho(reader, "Rho_fixedGridRhoFastjetAll");
   TTreeReaderArray<float> Jet_btagUParTAK4B(reader, "Jet_btagUParTAK4B");
+
+  // ---- jet ID inputs (jetid.json). Jet_jetId is only stored as a cross-check.
+  for (const char *bn : {"Jet_chHEF", "Jet_neHEF", "Jet_muEF"})
+    if (!chain.GetBranch(bn)) {
+      std::cerr << "ERROR: branch " << bn << " not found (needed by the jet ID)." << std::endl;
+      return;
+    }
+  TTreeReaderArray<float> Jet_chHEF(reader, "Jet_chHEF");
+  TTreeReaderArray<float> Jet_neHEF(reader, "Jet_neHEF");
+  TTreeReaderArray<float> Jet_muEF(reader, "Jet_muEF");
+  IntArrayReader Jet_chMultiplicity(reader, chain, "Jet_chMultiplicity");
+  IntArrayReader Jet_neMultiplicity(reader, chain, "Jet_neMultiplicity");
+  IntArrayReader Jet_nConstituents(reader, chain, "Jet_nConstituents");
+  IntArrayReader Jet_jetId(reader, chain, "Jet_jetId");
+  if (!Jet_jetId.ok)
+    std::cout << "INFO: Jet_jetId is not stored in NanoAODv15 -> jet_jetId_nano = -1 "
+                 "(jet ID is computed from jetid.json)" << std::endl;
+  if (!Jet_chMultiplicity.ok || !Jet_neMultiplicity.ok || !Jet_nConstituents.ok) {
+    std::cerr << "ERROR: unsupported/missing type of a jet ID branch (see types printed above)." << std::endl;
+    return;
+  }
   TTreeReaderArray<unsigned char> Jet_hadronFlavour(reader, "Jet_hadronFlavour");
-  // FIX: Jet_genJetIdx is Short_t in NanoAOD (was TTreeReaderArray<int>)
+  // Jet_genJetIdx is Short_t in NanoAOD (was TTreeReaderArray<int>)
   TTreeReaderArray<Short_t> Jet_genJetIdx(reader, "Jet_genJetIdx");
   TTreeReaderArray<float> GenJet_pt(reader, "GenJet_pt");
 
@@ -879,6 +1018,7 @@ void makeTree_MC_2024(
   Bool_t b_inWindow_115_135 = false;
 
   std::string b_sample = sampleName;
+  Int_t b_dataset_id = 0; // 0 = nominal, 1 = ext1
   Bool_t b_passEleVeto = true;
   Int_t b_nEleVeto = 0;
   Float_t b_puppimet_pt = -1, b_puppimet_phi = -99, b_pfmet_pt = -1, b_pfmet_phi = -99;
@@ -919,6 +1059,7 @@ void makeTree_MC_2024(
   Bool_t b_jj_has[2];
   Float_t b_jj_mass[2], b_jj_pt[2], b_jj_eta[2], b_jj_deta[2];
   Int_t b_jj_idx1[2], b_jj_idx2[2];
+  std::vector<int> v_jet_idTight, v_jet_idTightLV, v_jet_jetId_nano;
 
   std::vector<float> v_jet_pt, v_jet_pt_nano, v_jet_pt_raw, v_jet_eta, v_jet_phi, v_jet_mass,
       v_jet_btag, v_jet_chEmEF, v_jet_neEmEF, v_jet_dRmu, v_jet_btagSF;
@@ -929,6 +1070,7 @@ void makeTree_MC_2024(
   tree->Branch("lumi", &b_lumi, "lumi/i");
   tree->Branch("event", &b_event, "event/l");
   tree->Branch("sample", &b_sample);
+  tree->Branch("dataset_id", &b_dataset_id, "dataset_id/I");
 
   tree->Branch("passMETFilters", &b_passMETFilters, "passMETFilters/O");
   tree->Branch("HLT_IsoMu24", &b_HLT, "HLT_IsoMu24/O");
@@ -1041,6 +1183,9 @@ void makeTree_MC_2024(
   tree->Branch("jet_neEmEF", &v_jet_neEmEF);
   tree->Branch("jet_dRmu", &v_jet_dRmu);
   tree->Branch("jet_idOK", &v_jet_idOK);
+  tree->Branch("jet_idTight", &v_jet_idTight);
+  tree->Branch("jet_idTightLV", &v_jet_idTightLV);
+  tree->Branch("jet_jetId_nano", &v_jet_jetId_nano);
   tree->Branch("jet_vetoCand", &v_jet_vetoCand);
   tree->Branch("jet_inVetoMap", &v_jet_inVetoMap);
   tree->Branch("jet_passRegion", &v_jet_passRegion);
@@ -1056,6 +1201,9 @@ void makeTree_MC_2024(
 
   Long64_t nTotal = 0, nMETFilter = 0, nTrigger = 0, nTwoMuon = 0, nOS = 0, nPre = 0,
            nSelFull = 0, nVBF0 = 0, nVBF1 = 0;
+  Long64_t nPreDS[2] = {0, 0}, nSelFullDS[2] = {0, 0};
+  // VBF debug counters among sel_full events, per dijet mode
+  Long64_t nJJhas[2] = {0, 0}, nJJmass[2] = {0, 0}, nJJdeta[2] = {0, 0}, nJJbfail[2] = {0, 0};
 
   // ========================================================================
   // EVENT LOOP
@@ -1086,6 +1234,12 @@ void makeTree_MC_2024(
     const double mRaw = (r0 + r1).M();
     if (mRaw <= kMassMin || mRaw >= kMassMax) continue;
     nPre++;
+
+    // ---- dataset (nominal / ext1) of the file this event comes from
+    const int ds = fileDataset[chain.GetTreeNumber()];
+    nPreDS[ds]++;
+    b_dataset_id = ds;
+    b_sample = (sampleName.empty() ? std::string("") : sampleName + "_") + kDatasetNames[ds];
 
     // ---- third muon veto: exactly 2 good muons
     int nExtraGoodMu = 0;
@@ -1202,8 +1356,15 @@ void makeTree_MC_2024(
       ji.neEmEF = Jet_neEmEF[j];
       ji.hadFlav = Jet_hadronFlavour[j];
 
-      ji.idOK = jetCorr.passJetID(ji.p4);
-      ji.vetoCand = ji.idOK && (Jet_chEmEF[j] + Jet_neEmEF[j]) < 0.9;
+      // jet ID from jetid.json (AK4PUPPI)
+      const int idBits = evalJetId(Jet_eta[j], Jet_chHEF[j], Jet_neHEF[j], Jet_chEmEF[j],
+                                   Jet_neEmEF[j], Jet_muEF[j], Jet_chMultiplicity[j],
+                                   Jet_neMultiplicity[j], Jet_chMultiplicity[j] + Jet_neMultiplicity[j]);
+      ji.idTight = (idBits & 1) != 0;
+      ji.idTightLV = (idBits & 2) != 0;
+      ji.jetIdNano = Jet_jetId[j];
+      ji.idOK = ji.idTight;  // "tight jetID" of the agreed selection
+      ji.vetoCand = ji.idTightLV && (Jet_chEmEF[j] + Jet_neEmEF[j]) < 0.9;
       ji.inVetoMap = false;
       if (ji.vetoCand && !jetCorr.passJetVetoMap(Jet_eta[j], Jet_phi[j])) {
         ji.inVetoMap = true;
@@ -1214,7 +1375,7 @@ void makeTree_MC_2024(
       ji.passDRmu = (ji.dRmu >= 0.4);
       ji.passRegion = passRegionJetCut(corrJetPt, Jet_eta[j]);
       ji.passAnalysis = (corrJetPt > kJetPtMin) && (fabs(Jet_eta[j]) < kJetEtaMax) &&
-                        ji.idOK && ji.passRegion && ji.passDRmu;
+                        ji.idOK && ji.passRegion;  // dR(jet,mu) > 0.4 is NOT in the agreed selection; passDRmu is only stored
       jets.push_back(ji);
     }
 
@@ -1315,8 +1476,21 @@ void makeTree_MC_2024(
     b_selFull = trigMatched && b_selNoTrig;
     if (b_selFull) {
       nSelFull++;
+      nSelFullDS[ds]++;
       if (b_cat_isVBF[0]) nVBF0++;
       if (b_cat_isVBF[1]) nVBF1++;
+      // VBF debug counters (per dijet mode)
+      for (int m = 0; m < 2; m++) {
+        if (!b_jj_has[m]) continue;
+        nJJhas[m]++;
+        if (b_jj_mass[m] > 400.) {
+          nJJmass[m]++;
+          if (b_jj_deta[m] > 2.5) {
+            nJJdeta[m]++;
+            if (!b_passBVeto) nJJbfail[m]++;
+          }
+        }
+      }
     }
 
     // regions from the OFFICIAL m(mumu) = ScaRe + FSR (BSC/Nano pT)
@@ -1386,6 +1560,8 @@ void makeTree_MC_2024(
     v_jet_idOK.clear(); v_jet_vetoCand.clear(); v_jet_inVetoMap.clear();
     v_jet_passRegion.clear(); v_jet_passDRmu.clear(); v_jet_passAnalysis.clear();
 
+    v_jet_idTight.clear(); v_jet_idTightLV.clear(); v_jet_jetId_nano.clear();
+
     for (auto const &ji : jets) {
       v_jet_pt.push_back(ji.p4.Pt());
       v_jet_pt_nano.push_back(ji.ptNano);
@@ -1400,6 +1576,9 @@ void makeTree_MC_2024(
       v_jet_neEmEF.push_back(ji.neEmEF);
       v_jet_dRmu.push_back(ji.dRmu);
       v_jet_idOK.push_back(ji.idOK);
+      v_jet_idTight.push_back(ji.idTight);
+      v_jet_idTightLV.push_back(ji.idTightLV);
+      v_jet_jetId_nano.push_back(ji.jetIdNano);
       v_jet_vetoCand.push_back(ji.vetoCand);
       v_jet_inVetoMap.push_back(ji.inVetoMap);
       v_jet_passRegion.push_back(ji.passRegion);
@@ -1423,8 +1602,15 @@ void makeTree_MC_2024(
             << "\n  nMuon >= 2               = " << nTwoMuon
             << "\n  opposite sign            = " << nOS
             << "\n  raw pT>20, 50<mraw<200   = " << nPre << "  (= tree entries)"
+            << "\n    tree entries nominal / ext1   = " << nPreDS[0] << " / " << nPreDS[1]
             << "\n  of which sel_full        = " << nSelFull
+            << "\n    sel_full nominal / ext1       = " << nSelFullDS[0] << " / " << nSelFullDS[1]
             << "\n    sel_full && VBF[0] / [1]            = " << nVBF0 << " / " << nVBF1
+            << "\n  VBF steps among sel_full (has dijet / mjj>400 / +deta>2.5 / +bveto-fail):"
+            << "\n    mode 0 (two leading jets) = " << nJJhas[0] << " / " << nJJmass[0] << " / "
+            << nJJdeta[0] << " / " << nJJbfail[0]
+            << "\n    mode 1 (max mjj pair)     = " << nJJhas[1] << " / " << nJJmass[1] << " / "
+            << nJJdeta[1] << " / " << nJJbfail[1]
             << "\n  residual-hook failures   = " << gResidualFail << std::endl;
 
   out.cd();
@@ -1434,6 +1620,12 @@ void makeTree_MC_2024(
       .Write();
   TNamed("sampleName", sampleName.c_str()).Write();
   TNamed("jetEtaMax", std::to_string(kJetEtaMax).c_str()).Write();
+  TNamed("datasets", ("dataset_id 0 = nominal, 1 = ext1; files nominal/ext1 = " +
+                      std::to_string(nFilesDS[0]) + "/" + std::to_string(nFilesDS[1]) +
+                      "; entries nominal/ext1 = " + std::to_string(nEntriesDS[0]) + "/" +
+                      std::to_string(nEntriesDS[1]) + "; w_norm computed on the SUM of both")
+                         .c_str())
+      .Write();
   out.Close();
 
   delete Muon_nTrackerLayersI;
