@@ -1,28 +1,3 @@
-[nbostan@lxplus982 2025_Samples]$ cat DataMC_stack_Z_multi_2.C
-// ============================================================================
-//  DataMC_stack_Z_multi.C   (guncel: sync tree'leri -- makeTree_DATA/MC_2024_*_DeltaRcut)
-//
-//  1) Z bolgesi Data/MC STACK + ratio pad:
-//       dimuon mass/pt/eta, leading/subleading muon pt/eta,
-//       leading/subleading jet pt/eta, dijet mass/pt/eta
-//  2) 115-135 GeV bolgesi (sinyal penceresi): dimuon pt ve dijet pt
-//       -> DATA BLIND oldugu icin sadece MC stack (data / ratio YOK)
-//
-//  Kullanim (lxplus):  root -l -b -q DataMC_stack_Z_multi.C
-//  Cikti -> plots_stack/DataMC_stack_Z_<degisken>.{png,pdf}
-//           plots_stack/MCstack_SR115135_<degisken>.{png,pdf}
-//
-//  Tree'lerle uyumlu degisiklikler:
-//   * Resmi m(mumu) = mm_mass_fsr (ScaRe + FSR). mm_mass_corr FSR icermez.
-//     -> mmass / mmpt / mmeta artik mm_*_fsr kullanir.
-//   * Muon pT = mu{1,2}_pt_FSR_corr (ScaRe + FSR, pT'ye kesimler bununla uygulanir).
-//   * "before momentum correction" histogramlari kaldirildi, sadece after.
-//   * Secim = sel_full (muon ID/iso/eta/pT, trigger match, 3. muon veto, elektron
-//     veto) + MET filtreleri + HLT_IsoMu24. MC agirligi w_total (b-tag SF yok).
-//   * Eksen araliklari data/MC makrolarindaki kesimlere gore:
-//       pT1>26, pT2>20, |eta_mu|<2.4, jet pT>30, |eta_jet|<4.7
-//   * Tum plotlarda ana pad log, y minimum = 1e-4 (dimuon mass ile ayni).
-// ============================================================================
 #include "TFile.h"
 #include "TTree.h"
 #include "TNamed.h"
@@ -41,6 +16,7 @@
 #include <cstdio>
 #include <vector>
 #include <string>
+#include <map>
 #include <algorithm>
 
 // ----------------------------- AYARLAR --------------------------------------
@@ -87,10 +63,29 @@ const double kSRMassHi     = 135.;
 const double kBlindMargin  = 1.0;
 
 const bool   kNormToData = true;
-const bool   kRatioLog   = false;    // false: lineer ratio, aralik 0.5-1.5
+const bool   kUseInclusiveK = false; // true: ggH/VBF plotlarinda k = ayni degiskenin inclusive k'si
+const bool   kRatioLog   = false;    // false: lineer ratio (aralik kategoriye gore, bkz. MakeCats)
 const double kYMin       = 1e-4;     // tum plotlarda ana pad y minimum
 const int    kJJIdx      = 0;        // jj_* dizilerinde index: 0 = iki leading jet, 1 = max mjj cifti
 const char*  kLumiLabel  = "2024 Data H, 5.44 fb^{-1} (13.6 TeV)";
+
+// ------------------------- KATEGORI TANIMLARI -------------------------------
+struct Cat {
+  std::string tag;     // dosya/histogram adi oneki ("" = inclusive)
+  std::string cut;     // ek kesim
+  std::string label;   // plotta gosterilen etiket ("" = yok)
+  int    rebin;        // dusuk istatistik icin binleri birlestir (bolen bulunamazsa degismez)
+  double rLo, rHi;     // ratio pad araligi
+};
+
+std::vector<Cat> MakeCats() {
+  const std::string j = std::to_string(kJJIdx);
+  std::vector<Cat> c;
+  c.push_back({"",    "",                         "",                         1, 0.5, 1.5});  // inclusive
+  c.push_back({"ggH", "cat_isGGH[" + j + "]",     "ggH category (b-veto)",    1, 0.5, 1.5});
+  c.push_back({"VBF", "cat_isVBF[" + j + "]",     "VBF category (b-veto)",    2, 0.0, 2.0});
+  return c;
+}
 
 // ------------------------- DEGISKEN TANIMLARI -------------------------------
 struct Var {
@@ -125,11 +120,20 @@ std::vector<Var> MakeVars() {
   v.push_back({"jjmass", JJ("jj_mass"), jjCut, 75, 0, 1500, "m_{jj} [GeV]", "GeV"});
   v.push_back({"jjpt",   JJ("jj_pt"),   jjCut, 50, 0, 500,  "p_{T}^{jj} [GeV]", "GeV"});
   v.push_back({"jjeta",  JJ("jj_eta"),  jjCut, 40, -5, 5,   "#eta^{jj}", ""});
+  v.push_back({"jjdeta", JJ("jj_deta"), jjCut, 18, 0, 9,    "|#Delta#eta_{jj}|", ""});   // YENI (VBF icin onemli)
+  return v;
+}
+
+// bin sayisi r'ye (veya r'den kucuk bir bolene) tam bolunuyorsa binleri birlestir
+Var Rebinned(Var v, int r) {
+  for (int d = r; d > 1; --d)
+    if (v.nb % d == 0) { v.nb /= d; break; }
   return v;
 }
 // ----------------------------------------------------------------------------
 
 static int gCnt = 0;
+static std::map<std::string, double> gKincl;   // inclusive k'ler (degisken adina gore)
 
 std::vector<std::string> Glob(const std::string& pat) {
   std::vector<std::string> v;
@@ -210,14 +214,17 @@ void CMSLabel(double s = 1.0, const char* extra = "Work in progress") {
 // mcOnly = false : Data/MC stack + ratio (MC data'ya normalize)
 // mcOnly = true  : sadece MC stack (blind bolge), data ve ratio yok
 // massLo/massHi  : mm_mass_fsr penceresi (massLo<massHi ise uygulanir)
+// cat            : kategori (cat.cut secime eklenir; cat.tag dosya adina girer)
 // ---------------------------------------------------------------------------
 // blindLo/blindHi : (blindLo<blindHi ise) bu aralikta data bin'leri silinir, MC normalizasyonu
 //                   ve chi2 sadece blind disindaki (sideband) bin'lerden hesaplanir
-void StackPlot(const Var& var, const std::string& id, const char* lab,
-               double massLo, double massHi, bool mcOnly,
+void StackPlot(const Var& var, const std::string& id0, const char* lab,
+               double massLo, double massHi, bool mcOnly, const Cat& cat,
                double blindLo = 0., double blindHi = 0.) {
+  const std::string id = cat.tag.empty() ? id0 : (cat.tag + "_" + id0);  // dosya + ROOT nesne adlari
   const bool blind = (!mcOnly && blindLo < blindHi);
-  printf("\n===== %s (%s) %s =====\n", id.c_str(), var.expr.c_str(), mcOnly ? "[MC only]" : "");
+  printf("\n===== %s (%s) %s%s =====\n", id.c_str(), var.expr.c_str(), mcOnly ? "[MC only]" : "",
+         cat.tag.empty() ? "" : (" [" + cat.tag + "]").c_str());
 
   std::string cutMC   = kSelMC;
   std::string cutData = kSelData;
@@ -226,6 +233,7 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
     cutMC += "&&" + mc; cutData += "&&" + mc;
   }
   if (!var.extraCut.empty()) { cutMC += "&&" + var.extraCut; cutData += "&&" + var.extraCut; }
+  if (!cat.cut.empty())      { cutMC += "&&" + cat.cut;      cutData += "&&" + cat.cut; }
 
   TH1D* hD = nullptr;
   if (!mcOnly) {
@@ -258,13 +266,6 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
   hMC->SetDirectory(nullptr);
   for (size_t i = 1; i < hG.size(); ++i) hMC->Add(hG[i]);
 
-  // Blind plotta: data tree'sinde RAW m(mumu) in [blindLo,blindHi] olaylar HIC YAZILMADI, ama
-  // plot mm_mass_fsr uzerinden cizilir. RAW ile FSR kutlesi farkli oldugu icin bu kesim fsr
-  // kutlesinde blind araliginin kenarlarinda data'yi "oyar" (data eksigi / sizinti).
-  // Cozum: her MC grubu icin AYNI RAW kesimi uygulanmis kopya yapilir. Blind disindaki (sideband)
-  // bin'lerde stack bu kopyadan cizilir (data ile ayni olaylar). Blind icindeki bin'lerde tam MC
-  // kalir (sinyal beklentisi gorunsun). hMC bu hibrit stack'in toplami olur; normalizasyon, ratio,
-  // bant ve chi2 de ayni histogramdan hesaplanir (hCmp == hMC).
   // (Hibrit RAW-kesimli stack kaldirildi: 115/135'te basamak olusturuyordu. Stack her yerde
   //  tam MC; blind kenarlarindaki bozuk data bin'leri yukarida maskelendi.)
   TH1D* hCmp = hMC;
@@ -281,6 +282,13 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
     k = kNormToData ? nD / nM : 1.0;
     printf(" Data integral = %.6g, MC integral = %.6g, Data/MC = %.4f%s\n", nD, nM, nD / nM,
            kNormToData ? "  (MC data'ya normalize edildi)" : "");
+    if (kNormToData && kUseInclusiveK) {
+      if (cat.tag.empty()) gKincl[id0] = k;                       // inclusive: k'yi sakla
+      else if (gKincl.count(id0)) {                               // kategori: inclusive k'yi kullan
+        printf(" k(kategori) = %.4f -> inclusive k = %.4f kullaniliyor\n", k, gKincl[id0]);
+        k = gKincl[id0];
+      }
+    }
   } else {
     printf(" MC integral = %.6g (lumi'ye normalize, data yok)\n", hMC->Integral());
   }
@@ -336,12 +344,20 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
   for (int i = (int)hG.size() - 1; i >= 0; --i) lg->AddEntry(hG[i], used[i]->name.c_str(), "f");
   lg->Draw();
 
-  TLatex l; l.SetNDC(); l.SetTextSize(0.036 * s); l.DrawLatex(0.16, 0.85, lab);
+  // sol ust yazilar: bolge etiketi, (kategori etiketi), (blind notu) -- alt alta
+  double yTxt = 0.85;
+  TLatex l; l.SetNDC(); l.SetTextSize(0.036 * s); l.DrawLatex(0.16, yTxt, lab);
+  yTxt -= 0.05;
+  if (!cat.label.empty()) {
+    TLatex lc; lc.SetNDC(); lc.SetTextFont(62); lc.SetTextSize(0.034 * s);
+    lc.DrawLatex(0.16, yTxt, cat.label.c_str());
+    yTxt -= 0.05;
+  }
   CMSLabel(s);
 
   if (mcOnly) {
     TLatex lb; lb.SetNDC(); lb.SetTextSize(0.032 * s);
-    lb.DrawLatex(0.16, 0.80, "Data blinded (MC only)");
+    lb.DrawLatex(0.16, yTxt, "Data blinded (MC only)");
   } else {
     // ratio
     p2->cd();
@@ -351,7 +367,7 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
     r->SetTitle(""); r->SetStats(0);
     r->GetYaxis()->SetTitle("Data / MC");
     if (kRatioLog) { r->GetYaxis()->SetRangeUser(0.5, 2.0); r->GetYaxis()->SetMoreLogLabels(); }
-    else           { r->GetYaxis()->SetRangeUser(0.5, 1.5); r->GetYaxis()->SetNdivisions(505); }
+    else           { r->GetYaxis()->SetRangeUser(cat.rLo, cat.rHi); r->GetYaxis()->SetNdivisions(505); }
     r->GetYaxis()->SetTitleSize(0.11); r->GetYaxis()->SetTitleOffset(0.42); r->GetYaxis()->SetLabelSize(0.09);
     r->GetXaxis()->SetTitle(var.xTitle.c_str());
     r->GetXaxis()->SetTitleSize(0.13); r->GetXaxis()->SetLabelSize(0.10);
@@ -369,7 +385,7 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
     if (blind) {
       p1->cd();
       TLatex l2; l2.SetNDC(); l2.SetTextSize(0.032);
-      l2.DrawLatex(0.16, 0.80, Form("Data blinded: %g-%g GeV", blindLo, blindHi));
+      l2.DrawLatex(0.16, yTxt, Form("Data blinded: %g-%g GeV", blindLo, blindHi));
     }
   }
 
@@ -379,34 +395,42 @@ void StackPlot(const Var& var, const std::string& id, const char* lab,
 }
 
 // ============================================================================
-void DataMC_stack_Z_multi_2() {
+void DataMC_stack_Z_multi_3() {
   gSystem->mkdir(kOut.c_str(), true);
   gStyle->SetOptStat(0);
   gStyle->SetPadLeftMargin(0.13);
   TH1::SetDefaultSumw2(true);
 
   std::vector<Var> vars = MakeVars();
+  std::vector<Cat> cats = MakeCats();      // inclusive ILK olmali (kUseInclusiveK icin)
 
-  // 1) Z bolgesi: Data/MC stack + ratio
-  for (auto& v : vars) {
-    double lo = kApplyZWindow ? kZMassLo : 0., hi = kApplyZWindow ? kZMassHi : 0.;
-    // etiket uygulanan kesimden uretilir (pencere kapaliysa kesim yazilmaz)
-    std::string zlab = kApplyZWindow
-        ? std::string(Form("Z region: %g < m_{#mu#mu} < %g GeV", kZMassLo, kZMassHi))
-        : std::string("Z region (no mass window)");
-    StackPlot(v, v.name, zlab.c_str(), lo, hi, false);
-  }
+  for (const auto& cat : cats) {
+    printf("\n########## KATEGORI: %s ##########\n", cat.tag.empty() ? "inclusive" : cat.tag.c_str());
 
-  // 2) 115-135 GeV: dimuon pT ve dijet pT (sadece MC, data blind)
-  for (auto& v : vars) {
-    if (v.name != "mmpt" && v.name != "jjpt") continue;
-    StackPlot(v, v.name + "_SR115135", "115 < m_{#mu#mu} < 135 GeV", kSRMassLo, kSRMassHi, true);
-  }
+    // 1) Z bolgesi: Data/MC stack + ratio
+    for (const auto& v0 : vars) {
+      Var v = Rebinned(v0, cat.rebin);
+      double lo = kApplyZWindow ? kZMassLo : 0., hi = kApplyZWindow ? kZMassHi : 0.;
+      // etiket uygulanan kesimden uretilir (pencere kapaliysa kesim yazilmaz)
+      std::string zlab = kApplyZWindow
+          ? std::string(Form("Z region: %g < m_{#mu#mu} < %g GeV", kZMassLo, kZMassHi))
+          : std::string("Z region (no mass window)");
+      StackPlot(v, v0.name, zlab.c_str(), lo, hi, false, cat);
+    }
 
-  // 3) 110-150 GeV dimuon mass: data 115-135 blind (MC normalizasyonu sideband'lerden)
-  {
+    // 2) 115-135 GeV: dimuon pT, dijet pT (+ VBF/ggH icin dijet mass ve dEta) -- sadece MC, data blind
+    for (const auto& v0 : vars) {
+      bool keep = (v0.name == "mmpt" || v0.name == "jjpt");
+      if (!cat.tag.empty() && (v0.name == "jjmass" || v0.name == "jjdeta")) keep = true;
+      if (!keep) continue;
+      StackPlot(Rebinned(v0, cat.rebin), v0.name + "_SR115135", "115 < m_{#mu#mu} < 135 GeV",
+                kSRMassLo, kSRMassHi, true, cat);
+    }
+
+    // 3) 110-150 GeV dimuon mass: data 115-135 blind (MC normalizasyonu sideband'lerden)
     Var vw = {"mmass_110_150", "mm_mass_fsr", "", 80, 110, 150, "m_{#mu#mu} [GeV]", "GeV"};
-    StackPlot(vw, vw.name, "110 < m_{#mu#mu} < 150 GeV", 110., 150., false, kSRMassLo, kSRMassHi);
+    StackPlot(Rebinned(vw, cat.rebin), vw.name, "110 < m_{#mu#mu} < 150 GeV", 110., 150., false, cat,
+              kSRMassLo, kSRMassHi);
   }
 
   printf("\nBitti. Plotlar: %s\n", kOut.c_str());
